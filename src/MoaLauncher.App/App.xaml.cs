@@ -12,12 +12,20 @@ public partial class App : Application
     private EventWaitHandle? activationEvent;
     private RegisteredWaitHandle? activationRegistration;
     private TrayIconService? trayIcon;
+    private IStartupRegistration? startupRegistration;
+    internal IStartupRegistration StartupRegistration
+    {
+        get => startupRegistration ??= new WindowsStartupRegistration(
+            Environment.ProcessPath ?? throw new InvalidOperationException("런처 실행 파일의 위치를 찾지 못했습니다."), DataDirectory);
+        set => startupRegistration = value;
+    }
     internal bool IsExiting { get; private set; }
     public static string DataDirectory { get; private set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MoaLauncher");
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        var startInBackground = e.Args.Contains(WindowsStartupRegistration.BackgroundArgument, StringComparer.OrdinalIgnoreCase);
         var index = Array.IndexOf(e.Args, "--data-dir");
         if (index >= 0 && index + 1 < e.Args.Length) DataDirectory = Path.GetFullPath(e.Args[index + 1]);
         var identity = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(DataDirectory.ToUpperInvariant())))[..16];
@@ -26,7 +34,7 @@ public partial class App : Application
         instanceMutex = new Mutex(true, @"Local\MoaLauncher-" + identity, out ownsMutex);
         if (!ownsMutex)
         {
-            activationEvent.Set();
+            if (!startInBackground) activationEvent.Set();
             Shutdown();
             return;
         }
@@ -40,7 +48,8 @@ public partial class App : Application
         DispatcherUnhandledException += (_, args) =>
         {
             Log(args.Exception);
-            MessageBox.Show("작업을 완료하지 못했습니다.\n" + args.Exception.Message, "Moa Launcher", MessageBoxButton.OK, MessageBoxImage.Warning);
+            if (MainWindow?.IsVisible == true)
+                MessageBox.Show("작업을 완료하지 못했습니다.\n" + args.Exception.Message, "Moa Launcher", MessageBoxButton.OK, MessageBoxImage.Warning);
             args.Handled = true;
         };
         try
@@ -52,12 +61,16 @@ public partial class App : Application
                 if (!Dispatcher.HasShutdownStarted)
                     Dispatcher.BeginInvoke(new Action(RestoreMainWindow));
             }, null, Timeout.Infinite, executeOnlyOnce: false);
-            MainWindow.Show();
+            if (startInBackground)
+                _ = ((MainWindow)MainWindow).EnsureInitializedAsync();
+            else
+                MainWindow.Show();
         }
         catch (Exception ex)
         {
             Log(ex);
-            MessageBox.Show("런처를 시작하지 못했습니다.\n" + ex.Message, "Moa Launcher", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (!startInBackground)
+                MessageBox.Show("런처를 시작하지 못했습니다.\n" + ex.Message, "Moa Launcher", MessageBoxButton.OK, MessageBoxImage.Error);
             IsExiting = true;
             Shutdown(1);
         }

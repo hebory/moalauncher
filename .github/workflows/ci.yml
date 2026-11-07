@@ -21,3 +21,4 @@ jobs:
       - run: dotnet build MoaLauncher.sln -c Release --no-restore
       - run: dotnet test MoaLauncher.sln -c Release --no-build --logger "console;verbosity=normal"
       - run: dotnet run --project tests/MoaLauncher.App.SmokeTests -c Release --no-build
+      - run: dotnet run --project tests/MoaLauncher.App.SmokeTests -c Release --no-build -- --background

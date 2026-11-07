@@ -18,6 +18,7 @@ public partial class MainWindow : Window
     private readonly HttpClient http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(45) };
     private readonly IReleaseService releases;
     private readonly IInstallationService installations;
+    private readonly IStartupRegistration startupRegistration;
     private readonly List<AppItem> items = [];
     private readonly ObservableCollection<AppItem> visibleItems = [];
     private readonly Dictionary<string, CancellationTokenSource> operations = [];
@@ -26,6 +27,7 @@ public partial class MainWindow : Window
     private LauncherSettings settings = new();
     private bool ready;
     private bool initializationStarted;
+    private bool readingStartupSetting;
     private bool checking;
     private readonly SemaphoreSlim settingsGate = new(1, 1);
     private readonly CancellationTokenSource lifetime = new();
@@ -36,6 +38,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        startupRegistration = ((App)Application.Current).StartupRegistration;
         CheckIntervalInput.ItemsSource = LauncherSettings.SupportedCheckIntervalsMinutes
             .Select(minutes => new KeyValuePair<int, string>(minutes, minutes < 60 ? $"{minutes}분" : $"{minutes / 60}시간"))
             .ToList();
@@ -71,6 +74,7 @@ public partial class MainWindow : Window
             CheckIntervalInput.SelectedValue = settings.CheckIntervalMinutes;
             await LoadCatalogAsync();
             ready = true;
+            ReadStartupSetting();
             ApplyCheckSchedule();
             if (settings.CheckOnStartup) await CheckAllAsync();
         }
@@ -238,7 +242,13 @@ public partial class MainWindow : Window
     private void Library_Click(object sender, RoutedEventArgs e) => All_Click(sender, e);
     private void ClearFilters_Click(object sender, RoutedEventArgs e) { SearchBox.Clear(); Library_Click(sender, e); }
     private void Updates_Click(object sender, RoutedEventArgs e) { ShowLibrary(); filter = "updates"; PageTitle.Text = "업데이트"; ApplyFilter(); }
-    private void Settings_Click(object sender, RoutedEventArgs e) { LibraryView.Visibility = Visibility.Collapsed; SettingsView.Visibility = Visibility.Visible; SelectNavigation(SettingsNav); }
+    private void Settings_Click(object sender, RoutedEventArgs e)
+    {
+        ReadStartupSetting();
+        LibraryView.Visibility = Visibility.Collapsed;
+        SettingsView.Visibility = Visibility.Visible;
+        SelectNavigation(SettingsNav);
+    }
     private void ShowLibrary() { LibraryView.Visibility = Visibility.Visible; SettingsView.Visibility = Visibility.Collapsed; SelectNavigation(LibraryNav); }
     private void SelectNavigation(Button selected)
     {
@@ -309,6 +319,40 @@ public partial class MainWindow : Window
         timer.Stop();
         timer.Interval = interval;
         timer.Start();
+    }
+
+    private void ReadStartupSetting()
+    {
+        readingStartupSetting = true;
+        try
+        {
+            AutoStartCheck.IsChecked = startupRegistration.IsEnabled;
+            AutoStartCheck.IsEnabled = ready;
+        }
+        catch (Exception ex)
+        {
+            AutoStartCheck.IsEnabled = false;
+            ShowError(new InvalidOperationException("Windows 자동 실행 설정을 읽지 못했습니다. " + ex.Message, ex));
+        }
+        finally { readingStartupSetting = false; }
+    }
+
+    private void AutoStart_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!ready || readingStartupSetting) return;
+        try
+        {
+            var enabled = AutoStartCheck.IsChecked == true;
+            startupRegistration.SetEnabled(enabled);
+            StatusText.Text = enabled
+                ? "Windows 로그인 시 트레이에서 자동 실행합니다."
+                : "Windows 자동 실행을 껐습니다.";
+        }
+        catch (Exception ex)
+        {
+            ReadStartupSetting();
+            ShowError(new InvalidOperationException("Windows 자동 실행 설정을 변경하지 못했습니다. " + ex.Message, ex));
+        }
     }
 
     private async void Setting_Changed(object sender, RoutedEventArgs e)

@@ -14,6 +14,8 @@ dotnet run --project src/MoaLauncher.App
 
 설정의 **업데이트 확인 간격**에서 30분, 1시간, 3시간, 6시간, 12시간, 24시간 중 선택할 수 있습니다. 기본값은 **1시간**이며, 변경 즉시 다음 확인 간격에 적용되고 재실행해도 유지됩니다. 주기적 확인을 끄면 자동 확인 타이머가 중지됩니다. 시작할 때 확인하는 설정은 별도로 유지됩니다.
 
+**Windows 시작 시 자동 실행**은 기본으로 꺼져 있습니다. 설정에서 켜면 현재 사용자 계정의 Windows 시작 앱에 등록되고, 끄면 등록을 해제합니다. 로그인할 때 창 없이 트레이에서 시작하며, 켜 둔 업데이트 확인 설정은 그대로 적용됩니다. 직접 `MoaLauncher.exe`를 실행하면 이미 실행 중인 런처의 창을 다시 엽니다. 포터블 런처 폴더를 옮긴 경우에는 새 위치에서 자동 실행 옵션을 다시 켜 주세요.
+
 기본 화면에서는 프로그램 상태와 실행·설치·업데이트 버튼을 확인할 수 있습니다. **상세 보기**를 누르면 버전, 릴리스 노트, 설치 폴더, 프로그램 설정을 별도 창에서 볼 수 있습니다. 창 이동과 최대화는 Windows 기본 제목 표시줄을 사용합니다.
 
 **닫기(×)**를 누르면 창만 숨기고 시스템 트레이에서 계속 실행됩니다. 숨겨진 동안에도 설정한 간격으로 업데이트를 확인하고 진행 중인 작업을 이어갑니다. 트레이 아이콘을 클릭하거나 메뉴의 **모아 런처 열기**를 선택하면 다시 열립니다. 실행 파일을 다시 실행해도 기존 창이 열립니다. 완전히 끝내려면 트레이 메뉴의 **종료** 또는 설정의 **런처 종료**를 선택하세요. 설치·다운로드 중에는 작업이 끝나거나 다운로드를 취소한 뒤 종료할 수 있습니다.
@@ -24,6 +26,7 @@ dotnet run --project src/MoaLauncher.App
 dotnet build MoaLauncher.sln -c Release
 dotnet test MoaLauncher.sln -c Release
 dotnet run --project tests/MoaLauncher.App.SmokeTests -c Release
+dotnet run --project tests/MoaLauncher.App.SmokeTests -c Release -- --background
 ```
 
 게시용 Windows x64 ZIP과 체크섬은 다음 명령으로 만듭니다.

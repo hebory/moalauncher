@@ -17,22 +17,28 @@ internal static class Program
     private static readonly BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
 
     [STAThread]
-    private static int Main()
+    private static int Main(string[] args)
     {
+        if (args.Contains("--activation-probe", StringComparer.OrdinalIgnoreCase))
+            return RunActivationProbe();
+
         var testDataRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "testdata"));
         var dataDirectory = Path.GetFullPath(Path.Combine(testDataRoot, "tray-smoke-" + Guid.NewGuid().ToString("N")));
         EnsureUnderTestData(testDataRoot, dataDirectory);
         Directory.CreateDirectory(dataDirectory);
         WriteTestData(dataDirectory);
 
+        var startsInBackground = args.Contains(WindowsStartupRegistration.BackgroundArgument, StringComparer.OrdinalIgnoreCase);
         var app = new App();
+        var startupRegistration = new FakeStartupRegistration();
+        app.StartupRegistration = startupRegistration;
         SetDataDirectory(dataDirectory);
         app.InitializeComponent();
         app.Startup += (_, _) => app.Dispatcher.BeginInvoke(new Action(async () =>
         {
             try
             {
-                await RunLifecycleChecksAsync(app, dataDirectory);
+                await RunLifecycleChecksAsync(app, dataDirectory, testDataRoot, startupRegistration, startsInBackground);
             }
             catch (Exception ex)
             {
@@ -48,7 +54,7 @@ internal static class Program
             if (result != 0) throw new InvalidOperationException($"Application.Run returned {result}.");
             if (!app.IsExiting) throw new InvalidOperationException("Application.Run ended before an explicit exit request.");
             AssertTrayWasDisposed(app);
-            Console.WriteLine("PASS: tray hide, timer, restore, activation, exit guard, and cleanup.");
+            Console.WriteLine($"PASS: {(startsInBackground ? "background" : "normal")} startup, tray lifecycle, activation, startup setting, and cleanup.");
         }
         catch (Exception ex)
         {
@@ -68,9 +74,17 @@ internal static class Program
         return Environment.ExitCode;
     }
 
-    private static async Task RunLifecycleChecksAsync(App app, string dataDirectory)
+    private static int RunActivationProbe()
     {
-        await WaitUntilAsync(() => app.MainWindow is { IsLoaded: true } && GetField<bool>(app.MainWindow, "ready"),
+        var app = new App();
+        app.InitializeComponent();
+        return app.Run();
+    }
+
+    private static async Task RunLifecycleChecksAsync(App app, string dataDirectory, string testDataRoot,
+        FakeStartupRegistration startupRegistration, bool startsInBackground)
+    {
+        await WaitUntilAsync(() => app.MainWindow is not null && GetField<bool>(app.MainWindow, "ready"),
             "MainWindow initialization", app.Dispatcher);
         var window = (MainWindow)app.MainWindow;
         var timer = GetField<DispatcherTimer>(window, "timer");
@@ -82,9 +96,25 @@ internal static class Program
         if (menu.Items.Count < 3 || menu.Items[0].Text != "모아 런처 열기" || menu.Items[2].Text != "종료")
             throw new InvalidOperationException("Tray menu is missing its open or exit action.");
 
-        window.Close();
-        if (window.IsVisible || !window.IsLoaded || !timer.IsEnabled)
-            throw new InvalidOperationException("Close did not hide the main window while preserving its timer and lifetime.");
+        if (startsInBackground)
+        {
+            if (window.IsLoaded || window.IsVisible)
+                throw new InvalidOperationException("Background startup loaded or showed the main window.");
+        }
+        else if (!window.IsLoaded || !window.IsVisible)
+        {
+            throw new InvalidOperationException("Normal startup did not show the main window.");
+        }
+
+        StartupRegistrationChecks.Run();
+        await CheckStartupSettingToggleAsync(window, startupRegistration);
+
+        if (!startsInBackground)
+        {
+            window.Close();
+            if (window.IsVisible || !window.IsLoaded || !timer.IsEnabled)
+                throw new InvalidOperationException("Close did not hide the main window while preserving its timer and lifetime.");
+        }
 
         var checkedLabel = GetField<TextBlock>(window, "LastCheckedText");
         timer.Stop();
@@ -95,7 +125,8 @@ internal static class Program
         timer.Stop();
 
         app.RestoreMainWindow();
-        if (!window.IsVisible) throw new InvalidOperationException("RestoreMainWindow did not show the window.");
+        await WaitUntilAsync(() => window.IsLoaded, "first window load after background startup", app.Dispatcher);
+        if (!window.IsVisible || !window.IsLoaded) throw new InvalidOperationException("RestoreMainWindow did not show the window.");
         window.WindowState = WindowState.Minimized;
         app.HideMainWindow();
         app.RestoreMainWindow();
@@ -108,6 +139,8 @@ internal static class Program
         var activationName = @"Local\MoaLauncher-Activate-" + identity;
         using (var activationClient = EventWaitHandle.OpenExisting(activationName)) activationClient.Set();
         await WaitUntilAsync(() => window.IsVisible, "named activation event restore", app.Dispatcher);
+
+        await CheckDuplicateActivationAsync(app, window, testDataRoot, dataDirectory);
 
         app.HideMainWindow();
         menu.Items[0].PerformClick();
@@ -132,6 +165,78 @@ internal static class Program
         app.HideMainWindow();
         menu.Items[2].PerformClick();
         if (!app.IsExiting) throw new InvalidOperationException("Tray exit menu action did not request application exit.");
+    }
+
+    private static async Task CheckStartupSettingToggleAsync(MainWindow window, FakeStartupRegistration registration)
+    {
+        var checkBox = GetField<System.Windows.Controls.CheckBox>(window, "AutoStartCheck");
+        if (!checkBox.IsEnabled || checkBox.IsChecked != registration.IsEnabled)
+            throw new InvalidOperationException("Startup checkbox did not reflect the injected registration state.");
+
+        checkBox.IsChecked = true;
+        if (!registration.IsEnabled || checkBox.IsChecked != true)
+            throw new InvalidOperationException("Enabling startup registration did not update the fake registration.");
+
+        registration.FailNextSet = true;
+        checkBox.IsChecked = false;
+        if (!registration.IsEnabled || checkBox.IsChecked != true)
+            throw new InvalidOperationException("A failed startup registration change did not restore the actual state.");
+
+        checkBox.IsChecked = false;
+        if (registration.IsEnabled || checkBox.IsChecked != false)
+            throw new InvalidOperationException("Disabling startup registration did not update the fake registration.");
+        await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+    }
+
+    private static async Task CheckDuplicateActivationAsync(App app, MainWindow window, string testDataRoot, string dataDirectory)
+    {
+        app.HideMainWindow();
+        using (var backgroundProbe = StartActivationProbe(testDataRoot, dataDirectory, background: true))
+        {
+            await WaitForProbeExitAsync(backgroundProbe, "background duplicate activation");
+            await Task.Delay(150);
+            if (window.IsVisible) throw new InvalidOperationException("A background duplicate unexpectedly restored the hidden window.");
+        }
+
+        using (var interactiveProbe = StartActivationProbe(testDataRoot, dataDirectory, background: false))
+        {
+            await WaitForProbeExitAsync(interactiveProbe, "interactive duplicate activation");
+        }
+        await WaitUntilAsync(() => window.IsVisible, "interactive duplicate restoring the window", app.Dispatcher);
+    }
+
+    private static Process StartActivationProbe(string testDataRoot, string dataDirectory, bool background)
+    {
+        EnsureUnderTestData(testDataRoot, dataDirectory);
+        var executable = Environment.ProcessPath ?? throw new InvalidOperationException("Could not determine the smoke test process path.");
+        var startInfo = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+            WorkingDirectory = AppContext.BaseDirectory
+        };
+        if (string.Equals(Path.GetFileNameWithoutExtension(executable), "dotnet", StringComparison.OrdinalIgnoreCase))
+            startInfo.ArgumentList.Add(Assembly.GetExecutingAssembly().Location);
+        startInfo.ArgumentList.Add("--activation-probe");
+        if (background) startInfo.ArgumentList.Add(WindowsStartupRegistration.BackgroundArgument);
+        startInfo.ArgumentList.Add("--data-dir");
+        startInfo.ArgumentList.Add(dataDirectory);
+        return Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start an activation probe process.");
+    }
+
+    private static async Task WaitForProbeExitAsync(Process process, string description)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try { await process.WaitForExitAsync(timeout.Token); }
+        catch (OperationCanceledException)
+        {
+            try { process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { }
+            catch (System.ComponentModel.Win32Exception) { }
+            throw new TimeoutException($"Timed out waiting for {description}.");
+        }
+        if (process.ExitCode != 0) throw new InvalidOperationException($"{description} exited with code {process.ExitCode}.");
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition, string description, Dispatcher dispatcher)
@@ -213,5 +318,21 @@ internal static class Program
         File.WriteAllText(Path.Combine(dataDirectory, "settings.json"), """
             { "checkOnStartup": false, "periodicChecks": true, "checkIntervalMinutes": 60 }
             """);
+    }
+
+    private sealed class FakeStartupRegistration : IStartupRegistration
+    {
+        public bool IsEnabled { get; private set; }
+        internal bool FailNextSet { get; set; }
+
+        public void SetEnabled(bool enabled)
+        {
+            if (FailNextSet)
+            {
+                FailNextSet = false;
+                throw new InvalidOperationException("smoke test startup registration failure");
+            }
+            IsEnabled = enabled;
+        }
     }
 }
