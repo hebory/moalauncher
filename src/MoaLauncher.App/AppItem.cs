@@ -41,8 +41,6 @@ public sealed class AppItem(AppDefinition definition) : INotifyPropertyChanged
     public string ActionText => Busy ? "작업 중…" : NeedsConnection ? "저장소 연결" : HasUpdate ? "업데이트" : IsInstalled ? "실행하기  ↗" : Release is null ? "릴리스 확인" : "설치하기  ↓";
     public bool CanAct => !Busy;
     public bool CanCancel { get; set; }
-    private bool isSelected;
-    public bool IsSelected { get => isSelected; set { isSelected = value; Changed(); } }
     public string Notes => notes;
     private bool busy;
     public bool Busy { get => busy; set { busy = value; Refresh(); } }

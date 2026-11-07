@@ -1,0 +1,149 @@
+<Window x:Class="MoaLauncher.App.AppDetailsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="프로그램 상세 · Moa Launcher"
+        Width="600" Height="680" MinWidth="520" MinHeight="540"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Style="{StaticResource {x:Type Window}}">
+  <Grid Background="{StaticResource BackgroundBrush}">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+
+    <Grid Margin="28,24,28,19">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="58"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+      <Border Width="50" Height="50" CornerRadius="15" Background="{Binding AccentColor}">
+        <TextBlock Text="{Binding Monogram}" FontFamily="Segoe UI" FontWeight="Bold"
+                   FontSize="20" Foreground="#FFFFFF" HorizontalAlignment="Center"
+                   VerticalAlignment="Center"/>
+      </Border>
+      <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+        <DockPanel>
+          <Border DockPanel.Dock="Right" Background="{StaticResource SoftAccentBrush}"
+                  CornerRadius="6" Padding="8,3" VerticalAlignment="Center">
+            <TextBlock Text="{Binding Category}" Foreground="{StaticResource AccentBrush}"
+                       FontSize="10" FontWeight="SemiBold"/>
+          </Border>
+          <TextBlock Text="{Binding Name}" FontSize="21" FontWeight="Bold"
+                     AutomationProperties.Name="프로그램 이름"/>
+        </DockPanel>
+        <TextBlock Text="{Binding Description}" Foreground="{StaticResource MutedBrush}"
+                   FontSize="11" TextTrimming="CharacterEllipsis" MaxHeight="36" Margin="0,5,0,0"/>
+      </StackPanel>
+    </Grid>
+
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Margin="28,0,28,18">
+        <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1" CornerRadius="12" Padding="18,16">
+          <StackPanel>
+            <DockPanel Margin="0,0,0,13">
+              <Border DockPanel.Dock="Right" Background="#F0F2F6" CornerRadius="7"
+                      Padding="9,4" VerticalAlignment="Center">
+                <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusColor}"
+                           FontSize="10" FontWeight="SemiBold"/>
+              </Border>
+              <TextBlock Text="앱 상태" FontSize="13" FontWeight="SemiBold"/>
+            </DockPanel>
+
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
+              <Border Background="#F7F8FB" CornerRadius="8" Padding="12,10">
+                <StackPanel>
+                  <TextBlock Text="현재 설치 버전" FontSize="10" Foreground="{StaticResource MutedBrush}"/>
+                  <TextBlock Text="{Binding InstalledVersion}" FontSize="13" FontWeight="SemiBold" Margin="0,5,0,0"/>
+                </StackPanel>
+              </Border>
+              <Border Grid.Column="2" Background="{StaticResource SoftAccentBrush}"
+                      CornerRadius="8" Padding="12,10">
+                <StackPanel>
+                  <TextBlock Text="최신 공개 버전" FontSize="10" Foreground="{StaticResource MutedBrush}"/>
+                  <TextBlock Text="{Binding LatestVersion}" FontSize="13" FontWeight="SemiBold"
+                             Foreground="{StaticResource AccentBrush}" Margin="0,5,0,0"/>
+                </StackPanel>
+              </Border>
+            </Grid>
+            <TextBlock Text="{Binding Error}" Foreground="#C43F53" FontSize="11"
+                       Margin="0,11,0,0" TextWrapping="Wrap"
+                       Visibility="{Binding HasError, Converter={StaticResource BoolVisibility}}"/>
+          </StackPanel>
+        </Border>
+
+        <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1" CornerRadius="12" Padding="18,16" Margin="0,13,0,0">
+          <StackPanel>
+            <Grid Margin="0,0,0,9">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <TextBlock Text="릴리스 노트" FontSize="13" FontWeight="SemiBold"/>
+              <TextBlock Grid.Column="1" Text="{Binding SourceText}"
+                         Foreground="{StaticResource MutedBrush}" FontSize="10"
+                         VerticalAlignment="Center"/>
+            </Grid>
+            <TextBlock x:Name="PublishedAtText" Text="{Binding Release.PublishedAt, StringFormat='게시일 {0:yyyy.MM.dd}'}"
+                       Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,0,9">
+              <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding Release}" Value="{x:Null}">
+                      <Setter Property="Visibility" Value="Collapsed"/>
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </TextBlock.Style>
+            </TextBlock>
+            <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,0,0,10"/>
+            <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled" Focusable="False">
+              <TextBlock Text="{Binding Notes}" Foreground="#5F687A" FontSize="11"
+                         LineHeight="20" AutomationProperties.Name="릴리스 노트 본문"/>
+            </ScrollViewer>
+          </StackPanel>
+        </Border>
+
+        <WrapPanel Margin="0,14,0,0" HorizontalAlignment="Left">
+          <Button x:Name="RepositoryButton" Content="GitHub 릴리스 보기 ↗"
+                  Click="Repository_Click" IsEnabled="{Binding HasRepository}"
+                  Style="{StaticResource GhostButton}" Padding="11,8" Margin="0,0,7,7"
+                  AutomationProperties.Name="GitHub 릴리스 열기"/>
+          <Button x:Name="FolderButton" Content="설치 폴더 열기 ↗"
+                  Click="Folder_Click" IsEnabled="{Binding IsInstalled}"
+                  Style="{StaticResource GhostButton}" Padding="11,8" Margin="0,0,7,7"
+                  AutomationProperties.Name="설치 폴더 열기"/>
+          <Button Content="프로그램 설정" Click="Edit_Click"
+                  Style="{StaticResource GhostButton}" Padding="11,8" Margin="0,0,0,7"
+                  AutomationProperties.Name="프로그램 설정 열기"/>
+        </WrapPanel>
+      </StackPanel>
+    </ScrollViewer>
+
+    <Grid Grid.Row="2" Background="{StaticResource PanelBrush}">
+      <Border Height="1" Background="{StaticResource BorderBrush}" VerticalAlignment="Top"/>
+      <Grid Margin="28,14,28,14">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="10"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <Button Grid.Column="1" Content="닫기" Click="Close_Click" IsCancel="True"
+                Style="{StaticResource GhostButton}" MinWidth="70" AutomationProperties.Name="상세 정보 닫기"/>
+        <Button Grid.Column="3" Content="앱 실행 ↗" Click="Launch_Click"
+                MinWidth="112"
+                AutomationProperties.Name="설치된 프로그램 실행">
+          <Button.Style>
+            <Style TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+              <Setter Property="IsEnabled" Value="False"/>
+              <Style.Triggers>
+                <MultiDataTrigger>
+                  <MultiDataTrigger.Conditions>
+                    <Condition Binding="{Binding IsInstalled}" Value="True"/>
+                    <Condition Binding="{Binding CanAct}" Value="True"/>
+                  </MultiDataTrigger.Conditions>
+                  <Setter Property="IsEnabled" Value="True"/>
+                </MultiDataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Button.Style>
+        </Button>
+      </Grid>
+    </Grid>
+  </Grid>
+</Window>

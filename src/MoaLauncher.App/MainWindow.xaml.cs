@@ -4,14 +4,10 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Text.Json;
-using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
-using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
-using System.Windows.Interop;
 using Microsoft.Win32;
 using MoaLauncher.Core;
 
@@ -19,8 +15,6 @@ namespace MoaLauncher.App;
 
 public partial class MainWindow : Window
 {
-    private const int WmGetMinMaxInfo = 0x0024;
-    private const uint MonitorDefaultToNearest = 0x00000002;
     private readonly HttpClient http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(45) };
     private readonly IReleaseService releases;
     private readonly IInstallationService installations;
@@ -44,11 +38,6 @@ public partial class MainWindow : Window
         CheckIntervalInput.ItemsSource = LauncherSettings.SupportedCheckIntervalsMinutes
             .Select(minutes => new KeyValuePair<int, string>(minutes, minutes < 60 ? $"{minutes}분" : $"{minutes / 60}시간"))
             .ToList();
-        SourceInitialized += (_, _) =>
-        {
-            var handle = new WindowInteropHelper(this).Handle;
-            HwndSource.FromHwnd(handle)?.AddHook(WindowProc);
-        };
         releases = new GitHubReleaseService(http, Path.Combine(App.DataDirectory, "cache"));
         installations = new InstallationService(http, App.DataDirectory);
         AppCards.ItemsSource = visibleItems;
@@ -97,7 +86,6 @@ public partial class MainWindow : Window
             catch (Exception ex) { item.Error = ex.Message; App.Log(ex); }
             items.Add(item);
         }
-        SelectApp(null);
         ApplyFilter();
     }
 
@@ -108,9 +96,9 @@ public partial class MainWindow : Window
         visibleItems.Clear();
         foreach (var item in items.Where(i => (filter != "installed" || i.IsInstalled) && (filter != "updates" || i.HasUpdate)))
             if ($"{item.Name} {item.Description} {item.Repository}".Contains(search, StringComparison.OrdinalIgnoreCase)) visibleItems.Add(item);
-        TotalCount.Text = items.Count.ToString();
-        InstalledCount.Text = items.Count(i => i.IsInstalled).ToString();
-        UpdateCount.Text = items.Count(i => i.HasUpdate).ToString();
+        LibrarySummary.Text = $"{visibleItems.Count}개 프로그램";
+        var updates = items.Count(i => i.HasUpdate);
+        UpdatesNav.Content = updates > 0 ? $"업데이트 {updates}" : "업데이트";
         EmptyText.Text = search.Length > 0 ? "검색 조건에 맞는 프로그램이 없습니다." : filter switch
         {
             "updates" => "현재 확인된 업데이트가 없습니다. ‘업데이트 확인’으로 최신 상태를 확인하세요.",
@@ -118,13 +106,11 @@ public partial class MainWindow : Window
             _ => "새 프로그램을 추가해 나만의 라이브러리를 만들어 보세요."
         };
         EmptyPanel.Visibility = visibleItems.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        foreach (var (button, active) in new[] { (AllFilter, filter == "all"), (InstalledFilter, filter == "installed") })
+        foreach (var (button, active) in new[] { (AllFilter, filter == "all"), (InstalledFilter, filter == "installed"), (UpdatesNav, filter == "updates") })
         {
-            button.Background = active ? Brushes.White : Brushes.Transparent;
+            button.Background = active ? (Brush)FindResource("SoftAccentBrush") : Brushes.Transparent;
             button.Foreground = (Brush)FindResource(active ? "AccentBrush" : "MutedBrush");
         }
-        var selected = DetailsPanel.DataContext as AppItem;
-        SelectApp(selected is not null && visibleItems.Contains(selected) ? selected : visibleItems.FirstOrDefault());
     }
 
     private async Task CheckOneAsync(AppItem item, CancellationToken ct = default)
@@ -224,7 +210,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (item.Installed is null) return;
+            if (item.Installed is null || item.Busy) return;
             installations.Launch(item.Installed);
             StatusText.Text = $"{item.Name} 실행을 요청했습니다.";
         }
@@ -237,41 +223,35 @@ public partial class MainWindow : Window
     }
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await CheckAllAsync();
     private void Search_Changed(object sender, TextChangedEventArgs e) { if (ready) ApplyFilter(); }
-    private void All_Click(object sender, RoutedEventArgs e) { ShowLibrary(); PageTitle.Text = "라이브러리"; filter = "all"; ApplyFilter(); }
-    private void Installed_Click(object sender, RoutedEventArgs e) { ShowLibrary(); PageTitle.Text = "라이브러리"; filter = "installed"; ApplyFilter(); }
-    private void Library_Click(object sender, RoutedEventArgs e) { ShowLibrary(); filter = "all"; PageTitle.Text = "라이브러리"; ApplyFilter(); }
+    private void All_Click(object sender, RoutedEventArgs e) { ShowLibrary(); PageTitle.Text = "내 프로그램"; filter = "all"; ApplyFilter(); }
+    private void Installed_Click(object sender, RoutedEventArgs e) { ShowLibrary(); PageTitle.Text = "내 프로그램"; filter = "installed"; ApplyFilter(); }
+    private void Library_Click(object sender, RoutedEventArgs e) => All_Click(sender, e);
     private void ClearFilters_Click(object sender, RoutedEventArgs e) { SearchBox.Clear(); Library_Click(sender, e); }
-    private void Updates_Click(object sender, RoutedEventArgs e) { ShowLibrary(); SelectNavigation(UpdatesNav); filter = "updates"; PageTitle.Text = "업데이트"; ApplyFilter(); }
+    private void Updates_Click(object sender, RoutedEventArgs e) { ShowLibrary(); filter = "updates"; PageTitle.Text = "업데이트"; ApplyFilter(); }
     private void Settings_Click(object sender, RoutedEventArgs e) { LibraryView.Visibility = Visibility.Collapsed; SettingsView.Visibility = Visibility.Visible; SelectNavigation(SettingsNav); }
     private void ShowLibrary() { LibraryView.Visibility = Visibility.Visible; SettingsView.Visibility = Visibility.Collapsed; SelectNavigation(LibraryNav); }
     private void SelectNavigation(Button selected)
     {
-        foreach (var button in new[] { LibraryNav, UpdatesNav, SettingsNav })
+        foreach (var button in new[] { LibraryNav, SettingsNav })
         {
-            button.Background = button == selected ? new SolidColorBrush(Color.FromRgb(42, 52, 78)) : Brushes.Transparent;
-            button.Foreground = button == selected ? Brushes.White : (Brush)FindResource("NavTextBrush");
+            button.Background = button == selected ? (Brush)FindResource("SoftAccentBrush") : Brushes.Transparent;
+            button.Foreground = (Brush)FindResource(button == selected ? "AccentBrush" : "MutedBrush");
         }
-        BreadcrumbText.Text = selected == SettingsNav ? "설정" : selected == UpdatesNav ? "업데이트" : "라이브러리";
     }
-    private void SelectApp(AppItem? selected)
+    private void Details_Click(object sender, RoutedEventArgs e)
     {
-        foreach (var item in items) item.IsSelected = item == selected;
-        DetailsPanel.DataContext = selected;
-        DetailsPanel.Visibility = selected is null ? Visibility.Collapsed : Visibility.Visible;
-        DetailsPlaceholder.Visibility = selected is null ? Visibility.Visible : Visibility.Collapsed;
+        if ((sender as FrameworkElement)?.DataContext is not AppItem item) return;
+        var dialog = new AppDetailsWindow(item, LaunchItem, OpenRepository, OpenInstallFolder,
+            async selected => await EditAppAsync(selected)) { Owner = this };
+        dialog.ShowDialog();
     }
-    private void Details_Click(object sender, RoutedEventArgs e) => SelectApp(((FrameworkElement)sender).DataContext as AppItem);
-    private void CloseDetails_Click(object sender, RoutedEventArgs e) => SelectApp(null);
-    private void Launch_Click(object sender, RoutedEventArgs e) { if (DetailsPanel.DataContext is AppItem item) LaunchItem(item); }
-
-    private void OpenRepository_Click(object sender, RoutedEventArgs e)
+    private void OpenRepository(AppItem item)
     {
-        if (DetailsPanel.DataContext is not AppItem item || item.NeedsConnection) return;
-        OpenPath($"https://github.com/{item.Repository}/releases");
+        if (!item.NeedsConnection) OpenPath($"https://github.com/{item.Repository}/releases");
     }
-    private void OpenInstallFolder_Click(object sender, RoutedEventArgs e)
+    private void OpenInstallFolder(AppItem item)
     {
-        if (DetailsPanel.DataContext is AppItem { Installed: not null } item) OpenPath(item.Installed.InstallDirectory);
+        if (item.Installed is not null) OpenPath(item.Installed.InstallDirectory);
     }
     private void OpenDataFolder_Click(object sender, RoutedEventArgs e) => OpenPath(App.DataDirectory);
     private void OpenPath(string path)
@@ -281,7 +261,6 @@ public partial class MainWindow : Window
     }
 
     private async void AddApp_Click(object sender, RoutedEventArgs e) => await EditAppAsync(null);
-    private async void EditApp_Click(object sender, RoutedEventArgs e) => await EditAppAsync(DetailsPanel.DataContext as AppItem);
     private async Task EditAppAsync(AppItem? item)
     {
         if (checking || items.Any(i => i.Busy)) { StatusText.Text = "진행 중인 작업이 끝나면 프로그램 설정을 변경할 수 있습니다."; return; }
@@ -296,7 +275,7 @@ public partial class MainWindow : Window
             await LoadCatalogAsync();
             StatusText.Text = $"{dialog.Result.Name} 프로그램 설정을 저장했습니다.";
             ShowLibrary();
-            PageTitle.Text = "라이브러리";
+            PageTitle.Text = "내 프로그램";
             filter = "all";
             SearchBox.Clear();
             var added = items.First(i => i.Definition.Id == dialog.Result.Id);
@@ -371,85 +350,10 @@ public partial class MainWindow : Window
         catch (Exception ex) { ShowError(ex); }
     }
     private void ShowError(Exception ex) { App.Log(ex); StatusText.Text = ex.Message; }
-    private void Minimize_Click(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
-    private void Maximize_Click(object sender, RoutedEventArgs e)
-    {
-        if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this);
-        else SystemCommands.MaximizeWindow(this);
-    }
-    private void Close_Click(object sender, RoutedEventArgs e) => Close();
-    private static IntPtr WindowProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
-    {
-        if (message != WmGetMinMaxInfo || lParam == IntPtr.Zero) return IntPtr.Zero;
-        var monitor = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
-        if (monitor == IntPtr.Zero) return IntPtr.Zero;
-
-        var monitorInfo = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
-        if (!GetMonitorInfo(monitor, ref monitorInfo)) return IntPtr.Zero;
-
-        var info = Marshal.PtrToStructure<MinMaxInfo>(lParam);
-        info.MaxPosition.X = monitorInfo.Work.Left - monitorInfo.Monitor.Left;
-        info.MaxPosition.Y = monitorInfo.Work.Top - monitorInfo.Monitor.Top;
-        info.MaxSize.X = monitorInfo.Work.Right - monitorInfo.Work.Left;
-        info.MaxSize.Y = monitorInfo.Work.Bottom - monitorInfo.Work.Top;
-        Marshal.StructureToPtr(info, lParam, false);
-        handled = true;
-        return IntPtr.Zero;
-    }
-
-    private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        for (var element = e.OriginalSource as DependencyObject; element is not null; element = VisualTreeHelper.GetParent(element))
-            if (element is ButtonBase or TextBoxBase) return;
-        if (e.ClickCount == 2) Maximize_Click(sender, e);
-        else if (e.LeftButton == MouseButtonState.Pressed) DragMove();
-    }
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         if (operations.Count == 0) return;
         e.Cancel = true;
         StatusText.Text = "작업이 진행 중입니다. 다운로드를 취소하거나 설치 작업이 끝난 뒤 닫아주세요.";
-    }
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
-
-    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo monitorInfo);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Point
-    {
-        public int X;
-        public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MinMaxInfo
-    {
-        public Point Reserved;
-        public Point MaxSize;
-        public Point MaxPosition;
-        public Point MinTrackSize;
-        public Point MaxTrackSize;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Rect
-    {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-    private struct MonitorInfo
-    {
-        public int Size;
-        public Rect Monitor;
-        public Rect Work;
-        public uint Flags;
     }
 }
