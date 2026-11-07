@@ -1,0 +1,217 @@
+using System.Diagnostics;
+using System.IO;
+using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Threading;
+using System.Windows.Forms;
+using MoaLauncher.App;
+
+namespace MoaLauncher.App.SmokeTests;
+
+internal static class Program
+{
+    private const string InitialCheckedText = "아직 확인하지 않음";
+    private static readonly BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
+
+    [STAThread]
+    private static int Main()
+    {
+        var testDataRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "testdata"));
+        var dataDirectory = Path.GetFullPath(Path.Combine(testDataRoot, "tray-smoke-" + Guid.NewGuid().ToString("N")));
+        EnsureUnderTestData(testDataRoot, dataDirectory);
+        Directory.CreateDirectory(dataDirectory);
+        WriteTestData(dataDirectory);
+
+        var app = new App();
+        SetDataDirectory(dataDirectory);
+        app.InitializeComponent();
+        app.Startup += (_, _) => app.Dispatcher.BeginInvoke(new Action(async () =>
+        {
+            try
+            {
+                await RunLifecycleChecksAsync(app, dataDirectory);
+            }
+            catch (Exception ex)
+            {
+                Environment.ExitCode = 1;
+                Console.Error.WriteLine(ex);
+                ForceShutdown(app);
+            }
+        }));
+
+        var result = app.Run();
+        try
+        {
+            if (result != 0) throw new InvalidOperationException($"Application.Run returned {result}.");
+            if (!app.IsExiting) throw new InvalidOperationException("Application.Run ended before an explicit exit request.");
+            AssertTrayWasDisposed(app);
+            Console.WriteLine("PASS: tray hide, timer, restore, activation, exit guard, and cleanup.");
+        }
+        catch (Exception ex)
+        {
+            Environment.ExitCode = 1;
+            Console.Error.WriteLine(ex);
+        }
+        finally
+        {
+            if (!app.IsExiting)
+            {
+                try { app.RequestExit(); }
+                catch { }
+            }
+            EnsureUnderTestData(testDataRoot, dataDirectory);
+            if (Directory.Exists(dataDirectory)) Directory.Delete(dataDirectory, recursive: true);
+        }
+        return Environment.ExitCode;
+    }
+
+    private static async Task RunLifecycleChecksAsync(App app, string dataDirectory)
+    {
+        await WaitUntilAsync(() => app.MainWindow is { IsLoaded: true } && GetField<bool>(app.MainWindow, "ready"),
+            "MainWindow initialization", app.Dispatcher);
+        var window = (MainWindow)app.MainWindow;
+        var timer = GetField<DispatcherTimer>(window, "timer");
+        if (!timer.IsEnabled) throw new InvalidOperationException("Periodic timer was not enabled after initialization.");
+        var tray = GetField<object>(app, "trayIcon");
+        var notifyIcon = GetField<NotifyIcon>(tray, "notifyIcon");
+        var menu = GetField<ContextMenuStrip>(tray, "contextMenu");
+        if (!notifyIcon.Visible) throw new InvalidOperationException("Tray icon is not visible.");
+        if (menu.Items.Count < 3 || menu.Items[0].Text != "모아 런처 열기" || menu.Items[2].Text != "종료")
+            throw new InvalidOperationException("Tray menu is missing its open or exit action.");
+
+        window.Close();
+        if (window.IsVisible || !window.IsLoaded || !timer.IsEnabled)
+            throw new InvalidOperationException("Close did not hide the main window while preserving its timer and lifetime.");
+
+        var checkedLabel = GetField<TextBlock>(window, "LastCheckedText");
+        timer.Stop();
+        timer.Interval = TimeSpan.FromMilliseconds(100);
+        timer.Start();
+        await WaitUntilAsync(() => checkedLabel.Text != InitialCheckedText, "hidden timer update", app.Dispatcher);
+        if (window.IsVisible) throw new InvalidOperationException("A hidden periodic check unexpectedly showed the window.");
+        timer.Stop();
+
+        app.RestoreMainWindow();
+        if (!window.IsVisible) throw new InvalidOperationException("RestoreMainWindow did not show the window.");
+        window.WindowState = WindowState.Minimized;
+        app.HideMainWindow();
+        app.RestoreMainWindow();
+        if (!window.IsVisible || window.WindowState != WindowState.Normal)
+            throw new InvalidOperationException("RestoreMainWindow did not restore a minimized window.");
+
+        app.HideMainWindow();
+        var dataPath = Path.GetFullPath(dataDirectory).ToUpperInvariant();
+        var identity = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(dataPath))).Substring(0, 16);
+        var activationName = @"Local\MoaLauncher-Activate-" + identity;
+        using (var activationClient = EventWaitHandle.OpenExisting(activationName)) activationClient.Set();
+        await WaitUntilAsync(() => window.IsVisible, "named activation event restore", app.Dispatcher);
+
+        app.HideMainWindow();
+        menu.Items[0].PerformClick();
+        if (!window.IsVisible) throw new InvalidOperationException("Tray open menu action did not restore the window.");
+
+        var operations = GetField<Dictionary<string, CancellationTokenSource>>(window, "operations");
+        using (var syntheticOperation = new CancellationTokenSource())
+        {
+            operations.Add("smoke-test-active-operation", syntheticOperation);
+            try
+            {
+                app.RequestExit();
+                if (app.IsExiting || !window.IsVisible)
+                    throw new InvalidOperationException("Exit request was not refused while a synthetic operation was active.");
+            }
+            finally
+            {
+                operations.Remove("smoke-test-active-operation");
+            }
+        }
+
+        app.HideMainWindow();
+        menu.Items[2].PerformClick();
+        if (!app.IsExiting) throw new InvalidOperationException("Tray exit menu action did not request application exit.");
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, string description, Dispatcher dispatcher)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (!condition())
+        {
+            if (stopwatch.Elapsed > TimeSpan.FromSeconds(10))
+                throw new TimeoutException($"Timed out waiting for {description}.");
+            await Task.Delay(20);
+            dispatcher.VerifyAccess();
+        }
+    }
+
+    private static T GetField<T>(object instance, string name)
+    {
+        var field = instance.GetType().GetField(name, PrivateInstance)
+            ?? throw new MissingFieldException(instance.GetType().FullName, name);
+        return field.GetValue(instance) is T value
+            ? value
+            : throw new InvalidCastException($"Field {name} is not {typeof(T).Name}.");
+    }
+
+    private static void SetDataDirectory(string path)
+    {
+        var property = typeof(App).GetProperty(nameof(App.DataDirectory), BindingFlags.Static | BindingFlags.Public)
+            ?? throw new MissingMemberException(typeof(App).FullName, nameof(App.DataDirectory));
+        var setter = property.GetSetMethod(nonPublic: true)
+            ?? throw new MissingMethodException(typeof(App).FullName, "set_DataDirectory");
+        setter.Invoke(null, [path]);
+    }
+
+    private static void ForceShutdown(App app)
+    {
+        var property = typeof(App).GetProperty(nameof(App.IsExiting), BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingMemberException(typeof(App).FullName, nameof(App.IsExiting));
+        property.GetSetMethod(nonPublic: true)!.Invoke(app, [true]);
+        app.Shutdown(1);
+    }
+
+    private static void EnsureUnderTestData(string testDataRoot, string targetPath)
+    {
+        var root = Path.GetFullPath(testDataRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var target = Path.GetFullPath(targetPath);
+        if (!target.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Smoke test data path escaped its dedicated testdata folder.");
+    }
+
+    private static void AssertTrayWasDisposed(App app)
+    {
+        var tray = GetField<object>(app, "trayIcon");
+        if (!GetField<bool>(tray, "disposed")) throw new InvalidOperationException("Tray service was not disposed on app exit.");
+        var notifyIcon = GetField<NotifyIcon>(tray, "notifyIcon");
+        if (notifyIcon.Visible) throw new InvalidOperationException("NotifyIcon remained visible after app exit.");
+    }
+
+    private static void WriteTestData(string dataDirectory)
+    {
+        File.WriteAllText(Path.Combine(dataDirectory, "catalog.json"), """
+            {
+              "schemaVersion": 1,
+              "apps": [{
+                "id": "moaview",
+                "name": "모아뷰",
+                "description": "스모크 테스트용 로컬 항목",
+                "category": "테스트",
+                "accentColor": "#8BA3FF",
+                "monogram": "Mv",
+                "repository": "",
+                "packages": [
+                  { "architecture": "x64", "kind": "zip", "assetPattern": "MoaView-*-x64.zip", "executablePath": "MoaView.exe" },
+                  { "architecture": "x86", "kind": "zip", "assetPattern": "MoaView-*-x86.zip", "executablePath": "MoaView.exe" },
+                  { "architecture": "arm64", "kind": "zip", "assetPattern": "MoaView-*-arm64.zip", "executablePath": "MoaView.exe" }
+                ]
+              }]
+            }
+            """);
+
+        File.WriteAllText(Path.Combine(dataDirectory, "settings.json"), """
+            { "checkOnStartup": false, "periodicChecks": true, "checkIntervalMinutes": 60 }
+            """);
+    }
+}

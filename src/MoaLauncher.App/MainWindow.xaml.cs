@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private AppCatalog overrides = new();
     private LauncherSettings settings = new();
     private bool ready;
+    private bool initializationStarted;
     private bool checking;
     private readonly SemaphoreSlim settingsGate = new(1, 1);
     private readonly CancellationTokenSource lifetime = new();
@@ -42,14 +43,22 @@ public partial class MainWindow : Window
         installations = new InstallationService(http, App.DataDirectory);
         AppCards.ItemsSource = visibleItems;
         DataPathText.Text = App.DataDirectory;
-        Loaded += async (_, _) => await InitializeAsync();
+        Loaded += async (_, _) => await EnsureInitializedAsync();
         Closing += OnClosing;
-        Closed += (_, _) => { timer.Stop(); lifetime.Cancel(); http.Dispose(); };
+        Closed += (_, _) =>
+        {
+            timer.Stop();
+            lifetime.Cancel();
+            foreach (var operation in operations.Values) operation.Cancel();
+            http.Dispose();
+        };
         timer.Tick += async (_, _) => { if (settings.PeriodicChecks && !checking && operations.Count == 0) await CheckAllAsync(); };
     }
 
-    private async Task InitializeAsync()
+    internal async Task EnsureInitializedAsync()
     {
+        if (ready || initializationStarted) return;
+        initializationStarted = true;
         try
         {
             if (File.Exists(SettingsPath))
@@ -66,6 +75,7 @@ public partial class MainWindow : Window
             if (settings.CheckOnStartup) await CheckAllAsync();
         }
         catch (Exception ex) { ShowError(ex); }
+        finally { initializationStarted = false; }
     }
 
     private async Task LoadCatalogAsync()
@@ -350,10 +360,18 @@ public partial class MainWindow : Window
         catch (Exception ex) { ShowError(ex); }
     }
     private void ShowError(Exception ex) { App.Log(ex); StatusText.Text = ex.Message; }
+    private void Exit_Click(object sender, RoutedEventArgs e) => ((App)Application.Current).RequestExit();
     private void OnClosing(object? sender, CancelEventArgs e)
     {
-        if (operations.Count == 0) return;
+        if (((App)Application.Current).IsExiting) return;
         e.Cancel = true;
-        StatusText.Text = "작업이 진행 중입니다. 다운로드를 취소하거나 설치 작업이 끝난 뒤 닫아주세요.";
+        ((App)Application.Current).HideMainWindow();
+    }
+
+    internal bool TryPrepareExit()
+    {
+        if (operations.Count == 0) return true;
+        StatusText.Text = "작업이 진행 중입니다. 다운로드를 취소하거나 설치가 끝난 뒤 트레이에서 종료해주세요.";
+        return false;
     }
 }

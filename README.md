@@ -16,11 +16,14 @@ dotnet run --project src/MoaLauncher.App
 
 기본 화면에서는 프로그램 상태와 실행·설치·업데이트 버튼을 확인할 수 있습니다. **상세 보기**를 누르면 버전, 릴리스 노트, 설치 폴더, 프로그램 설정을 별도 창에서 볼 수 있습니다. 창 이동과 최대화는 Windows 기본 제목 표시줄을 사용합니다.
 
+**닫기(×)**를 누르면 창만 숨기고 시스템 트레이에서 계속 실행됩니다. 숨겨진 동안에도 설정한 간격으로 업데이트를 확인하고 진행 중인 작업을 이어갑니다. 트레이 아이콘을 클릭하거나 메뉴의 **모아 런처 열기**를 선택하면 다시 열립니다. 실행 파일을 다시 실행해도 기존 창이 열립니다. 완전히 끝내려면 트레이 메뉴의 **종료** 또는 설정의 **런처 종료**를 선택하세요. 설치·다운로드 중에는 작업이 끝나거나 다운로드를 취소한 뒤 종료할 수 있습니다.
+
 ## 빌드하고 테스트하기
 
 ```powershell
 dotnet build MoaLauncher.sln -c Release
 dotnet test MoaLauncher.sln -c Release
+dotnet run --project tests/MoaLauncher.App.SmokeTests -c Release
 ```
 
 게시용 Windows x64 ZIP과 체크섬은 다음 명령으로 만듭니다.

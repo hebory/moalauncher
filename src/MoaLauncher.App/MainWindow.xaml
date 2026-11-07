@@ -141,7 +141,7 @@
                 <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Value}"/></DataTemplate></ComboBox.ItemTemplate>
               </ComboBox>
             </Grid>
-            <TextBlock Text="설치와 업데이트는 직접 버튼을 눌렀을 때 시작됩니다."
+            <TextBlock Text="창을 닫아도 트레이에서 실행됩니다. 완전히 끝내려면 트레이 메뉴의 ‘종료’를 선택하세요."
                        Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,18,0,0"/>
           </StackPanel>
         </Border>
@@ -156,7 +156,11 @@
             </WrapPanel>
           </StackPanel>
         </Border>
-        <TextBlock Text="Moa Launcher 0.1.0" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,18,0,0"/>
+        <DockPanel Margin="0,14,0,0">
+          <Button DockPanel.Dock="Right" Content="런처 종료" Click="Exit_Click"
+                  Style="{StaticResource GhostButton}" FontSize="11" AutomationProperties.Name="런처 완전히 종료"/>
+          <TextBlock Text="Moa Launcher 0.1.0" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center"/>
+        </DockPanel>
       </StackPanel>
     </ScrollViewer>
 
