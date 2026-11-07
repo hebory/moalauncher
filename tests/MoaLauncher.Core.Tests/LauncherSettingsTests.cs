@@ -14,6 +14,28 @@ public sealed class LauncherSettingsTests
         Assert.Equal(60, settings.CheckIntervalMinutes);
         Assert.False(settings.CheckOnStartup);
         Assert.False(settings.PeriodicChecks);
+        Assert.True(settings.UpdateNotifications);
+    }
+
+    [Fact]
+    public void NewSettingsEnableUpdateNotifications()
+    {
+        Assert.True(new LauncherSettings().UpdateNotifications);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SavedNotificationPreferenceSurvivesRestart(bool enabled)
+    {
+        var original = new LauncherSettings { UpdateNotifications = enabled, CheckIntervalMinutes = 1440 };
+        var json = JsonSerializer.Serialize(original, CatalogService.JsonOptions);
+        var restored = JsonSerializer.Deserialize<LauncherSettings>(json, CatalogService.JsonOptions)!;
+
+        Assert.Equal(enabled, restored.UpdateNotifications);
+        Assert.Equal(1440, restored.CheckIntervalMinutes);
+        Assert.True(restored.CheckOnStartup);
+        Assert.True(restored.PeriodicChecks);
     }
 
     [Theory]

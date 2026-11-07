@@ -152,6 +152,10 @@
                 <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Value}"/></DataTemplate></ComboBox.ItemTemplate>
               </ComboBox>
             </Grid>
+            <CheckBox x:Name="UpdateNotificationCheck" Content="업데이트 알림" IsEnabled="False"
+                      Checked="Setting_Changed" Unchecked="Setting_Changed" Margin="0,22,0,0"/>
+            <TextBlock Text="새 버전을 찾으면 트레이로 알려줍니다. 꺼도 업데이트 확인은 계속됩니다."
+                       TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,8,0,0"/>
           </StackPanel>
         </Border>
         <Border Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="22" Margin="0,16,0,0">

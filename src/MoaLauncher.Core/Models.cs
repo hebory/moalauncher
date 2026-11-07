@@ -47,6 +47,7 @@ public sealed record LauncherSettings
 
     public bool CheckOnStartup { get; init; } = true;
     public bool PeriodicChecks { get; init; } = true;
+    public bool UpdateNotifications { get; init; } = true;
     private int checkIntervalMinutes = DefaultCheckIntervalMinutes;
     public int CheckIntervalMinutes
     {

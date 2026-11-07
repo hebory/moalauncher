@@ -74,9 +74,11 @@ public partial class MainWindow : Window
             }
             StartupCheck.IsChecked = settings.CheckOnStartup;
             PeriodicCheck.IsChecked = settings.PeriodicChecks;
+            UpdateNotificationCheck.IsChecked = settings.UpdateNotifications;
             CheckIntervalInput.SelectedValue = settings.CheckIntervalMinutes;
             await LoadCatalogAsync();
             ready = true;
+            UpdateNotificationCheck.IsEnabled = true;
             ReadStartupSetting();
             ApplyCheckSchedule();
             if (settings.CheckOnStartup) await CheckAllAsync();
@@ -176,7 +178,7 @@ public partial class MainWindow : Window
             var errors = items.Count(i => i.HasError);
             StatusText.Text = errors > 0 ? $"{errors}개 앱의 확인 결과를 살펴보세요. 앱 카드에 원인을 표시했습니다." : items.All(i => i.NeedsConnection) ? "저장소를 연결하면 최신 릴리스를 확인할 수 있습니다." : $"확인 완료 · 업데이트 가능한 프로그램 {items.Count(i => i.HasUpdate)}개";
             ApplyFilter();
-            ((App)Application.Current).NotifyUpdates(items);
+            NotifyUpdates(items);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
         finally { checking = false; RefreshButton.IsEnabled = operations.Count == 0; }
@@ -193,7 +195,7 @@ public partial class MainWindow : Window
             try { await CheckOneAsync(item, lifetime.Token); }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             finally { item.Busy = false; ApplyFilter(); }
-            ((App)Application.Current).NotifyUpdates([item]);
+            NotifyUpdates([item]);
             return;
         }
         using var cancellation = new CancellationTokenSource();
@@ -326,9 +328,14 @@ public partial class MainWindow : Window
             try { await CheckOneAsync(added, lifetime.Token); }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             finally { added.Busy = false; ApplyFilter(); }
-            ((App)Application.Current).NotifyUpdates([added]);
+            NotifyUpdates([added]);
         }
         catch (Exception ex) { ShowError(ex); }
+    }
+
+    private void NotifyUpdates(IEnumerable<AppItem> checkedItems)
+    {
+        if (settings.UpdateNotifications) ((App)Application.Current).NotifyUpdates(checkedItems);
     }
 
     private void ApplyCheckSchedule()
@@ -386,6 +393,7 @@ public partial class MainWindow : Window
         {
             CheckOnStartup = StartupCheck.IsChecked == true,
             PeriodicChecks = PeriodicCheck.IsChecked == true,
+            UpdateNotifications = UpdateNotificationCheck.IsChecked == true,
             CheckIntervalMinutes = CheckIntervalInput.SelectedValue is int minutes
                 ? minutes : LauncherSettings.DefaultCheckIntervalMinutes
         };

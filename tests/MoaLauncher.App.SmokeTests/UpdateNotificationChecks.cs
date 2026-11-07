@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -65,6 +66,22 @@ internal sealed class UpdateNotificationChecks
         if (!hiddenTip.Contains("트레이에서 계속 실행", StringComparison.Ordinal))
             throw new InvalidOperationException("The close-to-tray hint was not displayed before update notifications.");
 
+        var notificationCheck = GetField<System.Windows.Controls.CheckBox>(window, "UpdateNotificationCheck");
+        Require(notificationCheck.IsEnabled && notificationCheck.IsChecked == true,
+            "Legacy settings without the notification preference did not enable the notification toggle.");
+        await SetNotificationsAsync(window, false);
+        // Other settings share the save handler and must not reset the notification preference.
+        var periodicCheck = GetField<System.Windows.Controls.CheckBox>(window, "PeriodicCheck");
+        periodicCheck.IsChecked = false;
+        await AssertSavedPreferenceAsync(window, false);
+        periodicCheck.IsChecked = true;
+        await AssertSavedPreferenceAsync(window, false);
+        var timer = GetField<DispatcherTimer>(window, "timer");
+        Require(timer.IsEnabled && timer.Interval == TimeSpan.FromHours(1),
+            "Disabling notifications changed the periodic update schedule.");
+
+        const string disabledSentinel = "알림 꺼짐 검사";
+        notifyIcon.BalloonTipText = disabledSentinel;
         await CheckAllAsync(window);
         var targetItem = items.Single(item => item.Definition.Id == "smoke-update-target");
         var secondItem = items.Single(item => item.Definition.Id == "smoke-update-second");
@@ -79,6 +96,11 @@ internal sealed class UpdateNotificationChecks
         Require(invalidItem.HasUpdate && invalidItem.HasError, "The invalid-asset fixture did not produce an asset validation error.");
         Require(unconnectedItem.NeedsConnection && unconnectedItem.Release is null, "The unconnected fixture unexpectedly checked a release.");
         Require(installCalls.Count == 0, "Checking for updates unexpectedly installed a program.");
+        Require(notifyIcon.BalloonTipText == disabledSentinel,
+            "An update notification was sent while the preference was disabled.");
+
+        await SetNotificationsAsync(window, true);
+        await CheckAllAsync(window);
 
         var initialNotice = notifyIcon.BalloonTipText;
         Require(notifyIcon.BalloonTipTitle.Contains("업데이트", StringComparison.Ordinal), "The update notice title was not set.");
@@ -99,8 +121,18 @@ internal sealed class UpdateNotificationChecks
         await CheckAllAsync(window);
         Require(notifyIcon.BalloonTipText == duplicateSentinel,
             "A repeated check displayed the same release notification more than once.");
+        await SetNotificationsAsync(window, false);
+        await SetNotificationsAsync(window, true);
+        await CheckAllAsync(window);
+        Require(notifyIcon.BalloonTipText == duplicateSentinel,
+            "Toggling notifications discarded the already-announced release history.");
 
+        await SetNotificationsAsync(window, false);
         releaseResults[targetItem.Definition.Id] = new ReleaseResult(MakeRelease(targetItem.Definition, "v2.1.0"), IsCached: false);
+        await CheckAllAsync(window);
+        Require(targetItem.Release?.Tag == "v2.1.0" && notifyIcon.BalloonTipText == duplicateSentinel,
+            "A muted new version was not checked silently.");
+        await SetNotificationsAsync(window, true);
         await CheckAllAsync(window);
         var newVersionNotice = notifyIcon.BalloonTipText;
         Require(newVersionNotice != initialNotice && newVersionNotice.Contains(targetItem.Name, StringComparison.Ordinal),
@@ -152,7 +184,27 @@ internal sealed class UpdateNotificationChecks
         Require(!visible.Contains(targetItem) && !visible.Contains(secondItem) && installCalls.Count == 1,
             "A late notification restored completed updates or started another install.");
 
-        Console.WriteLine("PASS: aggregated update notifications, stale/error exclusions, deduplication, tray click navigation, and selected-app update.");
+        Console.WriteLine("PASS: notification settings and persistence, silent checks, aggregated notifications, exclusions, deduplication, tray click navigation, and selected-app update.");
+    }
+
+    private static async Task SetNotificationsAsync(MainWindow window, bool enabled)
+    {
+        GetField<System.Windows.Controls.CheckBox>(window, "UpdateNotificationCheck").IsChecked = enabled;
+        await AssertSavedPreferenceAsync(window, enabled);
+    }
+
+    private static async Task AssertSavedPreferenceAsync(MainWindow window, bool enabled)
+    {
+        var gate = GetField<SemaphoreSlim>(window, "settingsGate");
+        await gate.WaitAsync();
+        try
+        {
+            var saved = JsonSerializer.Deserialize<LauncherSettings>(
+                await File.ReadAllTextAsync(Path.Combine(App.DataDirectory, "settings.json")), CatalogService.JsonOptions)!;
+            Require(saved.UpdateNotifications == enabled && GetField<LauncherSettings>(window, "settings").UpdateNotifications == enabled,
+                "The notification preference was not applied and saved consistently.");
+        }
+        finally { gate.Release(); }
     }
 
     private static async Task CheckAllAsync(MainWindow window)
