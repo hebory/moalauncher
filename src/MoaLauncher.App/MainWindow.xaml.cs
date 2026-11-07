@@ -32,18 +32,21 @@ public partial class MainWindow : Window
     private readonly SemaphoreSlim settingsGate = new(1, 1);
     private readonly CancellationTokenSource lifetime = new();
     private string filter = "all";
+    private HashSet<string>? notifiedAppIds;
     private string CatalogPath => Path.Combine(App.DataDirectory, "catalog.json");
     private string SettingsPath => Path.Combine(App.DataDirectory, "settings.json");
 
-    public MainWindow()
+    public MainWindow() : this(null, null) { }
+
+    internal MainWindow(IReleaseService? releaseService, IInstallationService? installationService)
     {
         InitializeComponent();
         startupRegistration = ((App)Application.Current).StartupRegistration;
         CheckIntervalInput.ItemsSource = LauncherSettings.SupportedCheckIntervalsMinutes
             .Select(minutes => new KeyValuePair<int, string>(minutes, minutes < 60 ? $"{minutes}분" : $"{minutes / 60}시간"))
             .ToList();
-        releases = new GitHubReleaseService(http, Path.Combine(App.DataDirectory, "cache"));
-        installations = new InstallationService(http, App.DataDirectory);
+        releases = releaseService ?? new GitHubReleaseService(http, Path.Combine(App.DataDirectory, "cache"));
+        installations = installationService ?? new InstallationService(http, App.DataDirectory);
         AppCards.ItemsSource = visibleItems;
         DataPathText.Text = App.DataDirectory;
         Loaded += async (_, _) => await EnsureInitializedAsync();
@@ -108,7 +111,8 @@ public partial class MainWindow : Window
         if (AppCards is null) return;
         var search = SearchBox.Text.Trim();
         visibleItems.Clear();
-        foreach (var item in items.Where(i => (filter != "installed" || i.IsInstalled) && (filter != "updates" || i.HasUpdate)))
+        foreach (var item in items.Where(i => (filter != "installed" || i.IsInstalled) && (filter != "updates" || i.HasUpdate))
+            .OrderByDescending(i => filter == "updates" && notifiedAppIds?.Contains(i.Definition.Id) == true))
             if ($"{item.Name} {item.Description} {item.Repository}".Contains(search, StringComparison.OrdinalIgnoreCase)) visibleItems.Add(item);
         LibrarySummary.Text = $"{visibleItems.Count}개 프로그램";
         var updates = items.Count(i => i.HasUpdate);
@@ -172,6 +176,7 @@ public partial class MainWindow : Window
             var errors = items.Count(i => i.HasError);
             StatusText.Text = errors > 0 ? $"{errors}개 앱의 확인 결과를 살펴보세요. 앱 카드에 원인을 표시했습니다." : items.All(i => i.NeedsConnection) ? "저장소를 연결하면 최신 릴리스를 확인할 수 있습니다." : $"확인 완료 · 업데이트 가능한 프로그램 {items.Count(i => i.HasUpdate)}개";
             ApplyFilter();
+            ((App)Application.Current).NotifyUpdates(items);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
         finally { checking = false; RefreshButton.IsEnabled = operations.Count == 0; }
@@ -188,6 +193,7 @@ public partial class MainWindow : Window
             try { await CheckOneAsync(item, lifetime.Token); }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             finally { item.Busy = false; ApplyFilter(); }
+            ((App)Application.Current).NotifyUpdates([item]);
             return;
         }
         using var cancellation = new CancellationTokenSource();
@@ -237,11 +243,28 @@ public partial class MainWindow : Window
     }
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await CheckAllAsync();
     private void Search_Changed(object sender, TextChangedEventArgs e) { if (ready) ApplyFilter(); }
-    private void All_Click(object sender, RoutedEventArgs e) { ShowLibrary(); PageTitle.Text = "내 프로그램"; filter = "all"; ApplyFilter(); }
-    private void Installed_Click(object sender, RoutedEventArgs e) { ShowLibrary(); PageTitle.Text = "내 프로그램"; filter = "installed"; ApplyFilter(); }
+    private void All_Click(object sender, RoutedEventArgs e) { notifiedAppIds = null; ShowLibrary(); PageTitle.Text = "내 프로그램"; filter = "all"; ApplyFilter(); }
+    private void Installed_Click(object sender, RoutedEventArgs e) { notifiedAppIds = null; ShowLibrary(); PageTitle.Text = "내 프로그램"; filter = "installed"; ApplyFilter(); }
     private void Library_Click(object sender, RoutedEventArgs e) => All_Click(sender, e);
     private void ClearFilters_Click(object sender, RoutedEventArgs e) { SearchBox.Clear(); Library_Click(sender, e); }
-    private void Updates_Click(object sender, RoutedEventArgs e) { ShowLibrary(); filter = "updates"; PageTitle.Text = "업데이트"; ApplyFilter(); }
+    private void Updates_Click(object sender, RoutedEventArgs e) { notifiedAppIds = null; ShowLibrary(); filter = "updates"; PageTitle.Text = "업데이트"; ApplyFilter(); }
+    internal void ShowUpdateNotification(IReadOnlyCollection<string> appIds)
+    {
+        notifiedAppIds = new HashSet<string>(appIds, StringComparer.OrdinalIgnoreCase);
+        ShowLibrary();
+        filter = "updates";
+        PageTitle.Text = "업데이트";
+        SearchBox.Clear();
+        ApplyFilter();
+        ProgramScroll.ScrollToTop();
+        var targets = visibleItems.Where(i => notifiedAppIds.Contains(i.Definition.Id)).ToArray();
+        StatusText.Text = targets.Length switch
+        {
+            1 => $"{targets[0].Name}의 ‘업데이트’ 버튼을 눌러 설치할 수 있습니다.",
+            > 1 => $"알림을 받은 {targets.Length}개 프로그램을 목록 위쪽에 표시했습니다. ‘업데이트’ 버튼을 눌러 설치하세요.",
+            _ => "알림 이후 프로그램 상태가 바뀌었습니다. 현재 업데이트 목록을 확인하세요."
+        };
+    }
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
         ReadStartupSetting();
@@ -303,6 +326,7 @@ public partial class MainWindow : Window
             try { await CheckOneAsync(added, lifetime.Token); }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             finally { added.Busy = false; ApplyFilter(); }
+            ((App)Application.Current).NotifyUpdates([added]);
         }
         catch (Exception ex) { ShowError(ex); }
     }

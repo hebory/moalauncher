@@ -12,6 +12,7 @@ public partial class App : Application
     private EventWaitHandle? activationEvent;
     private RegisteredWaitHandle? activationRegistration;
     private TrayIconService? trayIcon;
+    internal Func<MainWindow> MainWindowFactory { get; set; } = () => new MainWindow();
     private IStartupRegistration? startupRegistration;
     internal IStartupRegistration StartupRegistration
     {
@@ -54,8 +55,8 @@ public partial class App : Application
         };
         try
         {
-            MainWindow = new MainWindow();
-            trayIcon = new TrayIconService(RestoreMainWindow, RequestExit);
+            MainWindow = MainWindowFactory();
+            trayIcon = new TrayIconService(RestoreMainWindow, RequestExit, OpenUpdateNotification);
             activationRegistration = ThreadPool.RegisterWaitForSingleObject(activationEvent, (_, _) =>
             {
                 if (!Dispatcher.HasShutdownStarted)
@@ -81,6 +82,26 @@ public partial class App : Application
         if (IsExiting) return;
         MainWindow?.Hide();
         trayIcon?.NotifyHidden();
+    }
+
+    internal void NotifyUpdates(IEnumerable<AppItem> items)
+    {
+        if (IsExiting) return;
+        try { trayIcon?.NotifyUpdates(items); }
+        catch (Exception ex) { Log(ex); }
+    }
+
+    private void OpenUpdateNotification(IReadOnlyCollection<string> appIds)
+    {
+        if (IsExiting || Dispatcher.HasShutdownStarted) return;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (IsExiting || MainWindow is not MainWindow window) return;
+            // Read-only details can be closed; leave any editor with unsaved input intact.
+            foreach (var details in window.OwnedWindows.OfType<AppDetailsWindow>().ToArray()) details.Close();
+            RestoreMainWindow();
+            window.ShowUpdateNotification(appIds);
+        }));
     }
 
     internal void RestoreMainWindow()

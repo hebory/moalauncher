@@ -69,7 +69,7 @@
         </Grid>
       </Grid>
 
-      <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,0,20">
+      <ScrollViewer x:Name="ProgramScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,0,20">
         <StackPanel>
           <Border x:Name="EmptyPanel" Background="White" BorderBrush="{StaticResource BorderBrush}"
                   BorderThickness="1" CornerRadius="12" Padding="24,40" Visibility="Collapsed">
