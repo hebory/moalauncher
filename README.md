@@ -10,7 +10,7 @@
 dotnet run --project src/MoaLauncher.App
 ```
 
-설치된 앱의 최신 버전을 확인하려면 앱에 공개된 GitHub 저장소가 필요합니다. 초기 모아뷰 카드가 표시되며, 저장소 주소가 확인되면 앱의 **··· → 프로그램 설정**에서 연결하거나 설정 화면에서 카탈로그 JSON을 가져오세요. 저장소 주소가 없는 상태에서 런처가 임의의 저장소나 실행 파일을 선택하지 않습니다.
+기본 모아뷰 카드는 [hebory/moaview](https://github.com/hebory/moaview)의 공개 GitHub Releases에 연결되어 있습니다. 실행할 때 최신 안정 버전을 확인하고 `%LOCALAPPDATA%\Programs\MoaView`의 기존 설치를 인식합니다. 다른 프로그램은 **프로그램 추가**로 등록하거나 설정 화면에서 카탈로그 JSON을 가져오세요.
 
 ## 빌드하고 테스트하기
 

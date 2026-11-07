@@ -8,7 +8,7 @@
       "category": "파일 · 미리보기",
       "accentColor": "#8BA3FF",
       "monogram": "Mv",
-      "repository": "",
+      "repository": "hebory/moaview",
       "packages": [
         {
           "architecture": "x64",

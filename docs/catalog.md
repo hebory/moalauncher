@@ -23,7 +23,7 @@
       "category": "파일 · 미리보기",
       "accentColor": "#8BA3FF",
       "monogram": "Mv",
-      "repository": "",
+      "repository": "hebory/moaview",
       "packages": [
         {
           "architecture": "x64",
@@ -38,7 +38,7 @@
 }
 ```
 
-위 예시의 `repository`는 빈 문자열이며 연결되지 않은 표시용 항목입니다. 모아뷰의 실제 GitHub 주소를 확인한 다음 `계정명/저장소명` 값으로 설정해야 합니다. 조사 당시 로컬 모아뷰 체크아웃에는 Git remote가 없어 온라인 릴리스를 연결하지 않았습니다.
+기본 모아뷰 항목은 사용자가 확인한 `hebory/moaview` 저장소에 연결됩니다. 다른 프로그램을 등록할 때는 해당 프로그램의 실제 `계정명/저장소명`을 입력하세요. 빈 `repository`도 표시용 항목으로 읽을 수 있지만 릴리스를 조회하거나 설치할 수 없습니다.
 
 `id`는 소문자 영문, 숫자, 하이픈으로 구성하며 앱마다 고유합니다. 카탈로그는 최대 100개 앱을 받습니다. `architecture`는 `x64`, `arm64`, `x86` 중 하나입니다. 앱에 여러 CPU별 패키지를 둘 수 있습니다. `kind`는 `zip` 또는 `inno`입니다. `assetPattern`은 파일명만 검사하고 `*`, `?`를 지원하며 `/`, `\`, `..`를 허용하지 않습니다. 각 패턴은 릴리스에서 정확히 하나의 파일만 찾아야 합니다. `executablePath`는 ZIP 또는 지정된 설치 폴더를 기준으로 한 상대 경로여야 합니다. `installDirectory`는 Inno Setup 패키지에만 쓰며 LocalAppData를 벗어날 수 없습니다.
 
