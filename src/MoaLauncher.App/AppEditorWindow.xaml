@@ -1,0 +1,21 @@
+<Window x:Class="MoaLauncher.App.AppEditorWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="프로그램 설정 · Moa Launcher" Width="570" Height="780" MinHeight="620" ResizeMode="CanResize" WindowStartupLocation="CenterOwner" ShowInTaskbar="False" Style="{StaticResource {x:Type Window}}">
+  <Grid Margin="28"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <StackPanel Margin="0,0,0,20"><TextBlock x:Name="Heading" Text="새 프로그램 추가" FontSize="24" FontWeight="Bold"/><TextBlock Text="공개 GitHub 저장소의 배포 파일을 연결하세요." Foreground="#9CA7BA" Margin="0,8,0,0"/></StackPanel>
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel Margin="0,0,14,0">
+      <TextBlock Text="프로그램 이름"/><TextBox x:Name="NameInput" Margin="0,6,0,14" AutomationProperties.Name="프로그램 이름"/>
+      <TextBlock Text="프로그램 ID · 영문 소문자, 숫자, 하이픈"/><TextBox x:Name="IdInput" Margin="0,6,0,14" AutomationProperties.Name="프로그램 ID"/>
+      <TextBlock Text="GitHub 저장소 · owner/repo 또는 GitHub 주소"/><TextBox x:Name="RepositoryInput" Margin="0,6,0,14" AutomationProperties.Name="GitHub 저장소"/>
+      <TextBlock Text="설명"/><TextBox x:Name="DescriptionInput" Margin="0,6,0,14" AutomationProperties.Name="프로그램 설명"/>
+      <Grid Margin="0,0,0,14"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="20"/><ColumnDefinition/></Grid.ColumnDefinitions>
+        <StackPanel><TextBlock Text="패키지 형식" Margin="0,0,0,6"/><ComboBox x:Name="KindInput" SelectedIndex="0" Padding="10,8" SelectionChanged="Kind_Changed"><ComboBoxItem Content="포터블 ZIP" Tag="zip"/><ComboBoxItem Content="Inno Setup 설치 파일" Tag="inno"/></ComboBox></StackPanel>
+        <StackPanel Grid.Column="2"><TextBlock Text="CPU 아키텍처" Margin="0,0,0,6"/><ComboBox x:Name="ArchitectureInput" SelectedIndex="0" Padding="10,8"><ComboBoxItem Content="x64"/><ComboBoxItem Content="arm64"/><ComboBoxItem Content="x86"/></ComboBox></StackPanel>
+      </Grid>
+      <TextBlock Text="릴리스 파일 패턴 · * 와 ? 사용 가능"/><TextBox x:Name="PatternInput" Margin="0,6,0,5" AutomationProperties.Name="릴리스 파일 패턴"/><TextBlock Text="예: MyApp-*-win-x64.zip 또는 MyApp-*-Setup-x64.exe" Foreground="#8290A5" FontSize="11" Margin="0,0,0,14"/>
+      <TextBlock Text="실행 파일 · 압축 해제 또는 설치 폴더 기준 상대 경로"/><TextBox x:Name="ExecutableInput" Margin="0,6,0,14" AutomationProperties.Name="실행 파일"/>
+      <StackPanel x:Name="InstallDirectoryPanel" Visibility="Collapsed"><TextBlock Text="설치 폴더 · %LOCALAPPDATA% 기준 상대 경로"/><TextBox x:Name="DirectoryInput" Margin="0,6,0,14" AutomationProperties.Name="설치 폴더"/></StackPanel>
+      <TextBlock Text="배포 파일에는 GitHub SHA-256 digest 또는 .sha256 / SHA256SUMS.txt 체크섬이 필요합니다." Foreground="#9CA7BA" FontSize="11" LineHeight="19" Margin="0,0,0,8"/>
+    </StackPanel></ScrollViewer>
+    <StackPanel Grid.Row="2" Margin="0,16,0,0"><TextBlock x:Name="ErrorText" Foreground="#FFADAD" Margin="0,0,0,12"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="취소" IsCancel="True" Margin="0,0,10,0"/><Button Content="저장하고 연결" Style="{StaticResource PrimaryButton}" IsDefault="True" Click="Save_Click"/></StackPanel></StackPanel>
+  </Grid>
+</Window>

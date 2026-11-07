@@ -7,5 +7,6 @@
     <Version>0.1.0</Version>
     <Company>Moa</Company>
     <Deterministic>true</Deterministic>
+    <UseSharedCompilation>false</UseSharedCompilation>
   </PropertyGroup>
 </Project>
