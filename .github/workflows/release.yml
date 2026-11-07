@@ -1,0 +1,61 @@
+name: Publish Windows release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet restore MoaLauncher.sln
+      - run: dotnet build MoaLauncher.sln -c Release --no-restore
+      - run: dotnet test MoaLauncher.sln -c Release --no-build --logger "console;verbosity=normal"
+      - name: Check tag and app version
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          if ($tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw "Release tag must use vMAJOR.MINOR.PATCH; found '$tag'." }
+          $tagVersion = $Matches[1]
+          [xml]$project = Get-Content Directory.Build.props
+          $version = [string]$project.Project.PropertyGroup.Version
+          if (!$version) { throw 'Directory.Build.props에 Version이 없습니다.' }
+          if ($tagVersion -ne $version) { throw "Tag $tagVersion does not match project version $version. Update the project version before tagging." }
+          "MOA_RELEASE_VERSION=$tagVersion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Publish and checksum
+        shell: pwsh
+        run: ./scripts/Publish.ps1 -Version $env:MOA_RELEASE_VERSION
+      - name: Upload GitHub Release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $archive = "artifacts/distribution/moa-launcher-$env:MOA_RELEASE_VERSION-windows-x64.zip"
+          $checksum = "$archive.sha256"
+          $checksums = 'artifacts/distribution/SHA256SUMS.txt'
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            gh release view $env:GITHUB_REF_NAME *> $null
+            if ($LASTEXITCODE -ne 0) {
+              gh release create $env:GITHUB_REF_NAME $archive $checksum $checksums --title "Moa Launcher $env:MOA_RELEASE_VERSION" --generate-notes
+            } else {
+              gh release upload $env:GITHUB_REF_NAME $archive $checksum $checksums --clobber
+            }
+          } else {
+            throw 'Manual release publishing must run from a version tag (vMAJOR.MINOR.PATCH).'
+          }

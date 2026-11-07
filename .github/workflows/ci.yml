@@ -1,0 +1,22 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet restore MoaLauncher.sln
+      - run: dotnet build MoaLauncher.sln -c Release --no-restore
+      - run: dotnet test MoaLauncher.sln -c Release --no-build --logger "console;verbosity=normal"

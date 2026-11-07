@@ -212,12 +212,17 @@ public partial class MainWindow : Window
     }
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await CheckAllAsync();
     private void Search_Changed(object sender, TextChangedEventArgs e) { if (ready) ApplyFilter(); }
-    private void All_Click(object sender, RoutedEventArgs e) { filter = "all"; ApplyFilter(); }
-    private void Installed_Click(object sender, RoutedEventArgs e) { filter = "installed"; ApplyFilter(); }
+    private void All_Click(object sender, RoutedEventArgs e) { ShowLibrary(); PageTitle.Text = "내 프로그램"; filter = "all"; ApplyFilter(); }
+    private void Installed_Click(object sender, RoutedEventArgs e) { ShowLibrary(); PageTitle.Text = "내 프로그램"; filter = "installed"; ApplyFilter(); }
     private void Library_Click(object sender, RoutedEventArgs e) { ShowLibrary(); filter = "all"; PageTitle.Text = "내 프로그램"; ApplyFilter(); }
-    private void Updates_Click(object sender, RoutedEventArgs e) { ShowLibrary(); filter = "updates"; PageTitle.Text = "업데이트"; ApplyFilter(); }
-    private void Settings_Click(object sender, RoutedEventArgs e) { LibraryView.Visibility = Visibility.Collapsed; SettingsView.Visibility = Visibility.Visible; }
-    private void ShowLibrary() { LibraryView.Visibility = Visibility.Visible; SettingsView.Visibility = Visibility.Collapsed; }
+    private void Updates_Click(object sender, RoutedEventArgs e) { ShowLibrary(); SelectNavigation(UpdatesNav); filter = "updates"; PageTitle.Text = "업데이트"; ApplyFilter(); }
+    private void Settings_Click(object sender, RoutedEventArgs e) { LibraryView.Visibility = Visibility.Collapsed; SettingsView.Visibility = Visibility.Visible; SelectNavigation(SettingsNav); }
+    private void ShowLibrary() { LibraryView.Visibility = Visibility.Visible; SettingsView.Visibility = Visibility.Collapsed; SelectNavigation(LibraryNav); }
+    private void SelectNavigation(Button selected)
+    {
+        foreach (var button in new[] { LibraryNav, UpdatesNav, SettingsNav })
+            button.Background = button == selected ? new SolidColorBrush(Color.FromRgb(43, 53, 64)) : Brushes.Transparent;
+    }
     private void Details_Click(object sender, RoutedEventArgs e) { DetailsPanel.DataContext = ((FrameworkElement)sender).DataContext; DetailsPanel.Visibility = Visibility.Visible; DetailsPanel.BringIntoView(); }
     private void CloseDetails_Click(object sender, RoutedEventArgs e) => DetailsPanel.Visibility = Visibility.Collapsed;
     private void Launch_Click(object sender, RoutedEventArgs e) { if (DetailsPanel.DataContext is AppItem item) LaunchItem(item); }
@@ -253,6 +258,10 @@ public partial class MainWindow : Window
             await CatalogService.SaveAsync(CatalogPath, new AppCatalog { Apps = updated });
             await LoadCatalogAsync();
             StatusText.Text = $"{dialog.Result.Name} 프로그램 설정을 저장했습니다.";
+            ShowLibrary();
+            PageTitle.Text = "내 프로그램";
+            filter = "all";
+            SearchBox.Clear();
             var added = items.First(i => i.Definition.Id == dialog.Result.Id);
             added.Busy = true;
             try { await CheckOneAsync(added, lifetime.Token); }
