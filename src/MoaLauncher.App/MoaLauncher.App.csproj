@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>MoaLauncher</AssemblyName>
+    <Product>Moa Launcher</Product>
+    <Description>모아 프로그램 설치 및 업데이트 런처</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../MoaLauncher.Core/MoaLauncher.Core.csproj" />
+    <Content Include="../../catalog/apps.json" Link="catalog/apps.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "apps": [
+    {
+      "id": "moaview",
+      "name": "모아뷰",
+      "description": "이미지부터 문서까지, 파일을 열기 전에 빠르고 가볍게 미리보세요.",
+      "category": "파일 · 미리보기",
+      "accentColor": "#8BA3FF",
+      "monogram": "Mv",
+      "repository": "",
+      "packages": [
+        {
+          "architecture": "x64",
+          "kind": "inno",
+          "assetPattern": "MoaView-*-Setup-x64.exe",
+          "executablePath": "MoaView.exe",
+          "installDirectory": "Programs/MoaView"
+        }
+      ]
+    }
+  ]
+}
