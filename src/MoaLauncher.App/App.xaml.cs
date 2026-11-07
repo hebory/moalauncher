@@ -28,7 +28,7 @@ public partial class App : Application
         EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent, new RoutedEventHandler((sender, _) =>
         {
             if (sender is not Window window) return;
-            var enabled = 1;
+            var enabled = 0;
             DwmSetWindowAttribute(new WindowInteropHelper(window).Handle, 20, ref enabled, sizeof(int));
         }));
         DispatcherUnhandledException += (_, args) =>
