@@ -12,6 +12,8 @@ dotnet run --project src/MoaLauncher.App
 
 기본 모아뷰 카드는 [hebory/moaview](https://github.com/hebory/moaview)의 공개 GitHub Releases에 연결되어 있습니다. 실행할 때 최신 안정 버전을 확인하고 `%LOCALAPPDATA%\Programs\MoaView`의 기존 설치를 인식합니다. 다른 프로그램은 **프로그램 추가**로 등록하거나 설정 화면에서 카탈로그 JSON을 가져오세요.
 
+설정의 **업데이트 확인 간격**에서 30분, 1시간, 3시간, 6시간, 12시간, 24시간 중 선택할 수 있습니다. 기본값은 **1시간**이며, 변경 즉시 다음 확인 간격에 적용되고 재실행해도 유지됩니다. 주기적 확인을 끄면 자동 확인 타이머가 중지됩니다. 시작할 때 확인하는 설정은 별도로 유지됩니다.
+
 ## 빌드하고 테스트하기
 
 ```powershell

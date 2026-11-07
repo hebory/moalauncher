@@ -126,7 +126,18 @@
               <CheckBox x:Name="StartupCheck" Content="런처를 열 때 새 버전 확인" Checked="Setting_Changed" Unchecked="Setting_Changed"/>
               <TextBlock Text="프로그램의 최신 상태로 하루를 시작하세요." Foreground="#8C98AD" FontSize="11" Margin="0,8,0,20"/>
               <Border Height="1" Background="#EDF0F5" Margin="0,0,0,20"/>
-              <CheckBox x:Name="PeriodicCheck" Content="실행 중 30분마다 새 버전 확인" Checked="Setting_Changed" Unchecked="Setting_Changed"/>
+              <CheckBox x:Name="PeriodicCheck" Content="실행 중 주기적으로 새 버전 확인" Checked="Setting_Changed" Unchecked="Setting_Changed"/>
+              <Grid Margin="0,16,0,12" IsEnabled="{Binding IsChecked, ElementName=PeriodicCheck}">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="160"/></Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock Text="업데이트 확인 간격" FontSize="12" FontWeight="SemiBold"/>
+                  <TextBlock Text="런처가 실행 중일 때 적용됩니다. 기본값은 1시간입니다." Foreground="#8C98AD" FontSize="11" Margin="0,5,16,0"/>
+                </StackPanel>
+                <ComboBox x:Name="CheckIntervalInput" Grid.Column="1" SelectedValuePath="Key"
+                          SelectionChanged="Setting_Changed" AutomationProperties.Name="업데이트 확인 간격">
+                  <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Value}"/></DataTemplate></ComboBox.ItemTemplate>
+                </ComboBox>
+              </Grid>
               <TextBlock Text="설치와 업데이트는 직접 버튼을 눌렀을 때 시작됩니다." Foreground="#8C98AD" FontSize="11" Margin="0,8,0,0"/>
             </StackPanel></Border>
             <TextBlock Text="프로그램과 데이터" Style="{StaticResource SectionTitle}" Margin="0,28,0,14"/>

@@ -27,7 +27,7 @@ public partial class MainWindow : Window
     private readonly List<AppItem> items = [];
     private readonly ObservableCollection<AppItem> visibleItems = [];
     private readonly Dictionary<string, CancellationTokenSource> operations = [];
-    private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMinutes(30) };
+    private readonly DispatcherTimer timer = new();
     private AppCatalog overrides = new();
     private LauncherSettings settings = new();
     private bool ready;
@@ -41,6 +41,9 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        CheckIntervalInput.ItemsSource = LauncherSettings.SupportedCheckIntervalsMinutes
+            .Select(minutes => new KeyValuePair<int, string>(minutes, minutes < 60 ? $"{minutes}분" : $"{minutes / 60}시간"))
+            .ToList();
         SourceInitialized += (_, _) =>
         {
             var handle = new WindowInteropHelper(this).Handle;
@@ -67,9 +70,10 @@ public partial class MainWindow : Window
             }
             StartupCheck.IsChecked = settings.CheckOnStartup;
             PeriodicCheck.IsChecked = settings.PeriodicChecks;
+            CheckIntervalInput.SelectedValue = settings.CheckIntervalMinutes;
             await LoadCatalogAsync();
             ready = true;
-            timer.Start();
+            ApplyCheckSchedule();
             if (settings.CheckOnStartup) await CheckAllAsync();
         }
         catch (Exception ex) { ShowError(ex); }
@@ -304,10 +308,31 @@ public partial class MainWindow : Window
         catch (Exception ex) { ShowError(ex); }
     }
 
+    private void ApplyCheckSchedule()
+    {
+        if (!settings.PeriodicChecks)
+        {
+            timer.Stop();
+            return;
+        }
+        var interval = TimeSpan.FromMinutes(settings.CheckIntervalMinutes);
+        if (timer.IsEnabled && timer.Interval == interval) return;
+        timer.Stop();
+        timer.Interval = interval;
+        timer.Start();
+    }
+
     private async void Setting_Changed(object sender, RoutedEventArgs e)
     {
         if (!ready) return;
-        settings = new LauncherSettings { CheckOnStartup = StartupCheck.IsChecked == true, PeriodicChecks = PeriodicCheck.IsChecked == true };
+        settings = new LauncherSettings
+        {
+            CheckOnStartup = StartupCheck.IsChecked == true,
+            PeriodicChecks = PeriodicCheck.IsChecked == true,
+            CheckIntervalMinutes = CheckIntervalInput.SelectedValue is int minutes
+                ? minutes : LauncherSettings.DefaultCheckIntervalMinutes
+        };
+        ApplyCheckSchedule();
         await settingsGate.WaitAsync();
         try
         {

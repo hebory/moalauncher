@@ -41,8 +41,19 @@ public sealed record InstallProgress(string Stage, long BytesReceived = 0, long?
 }
 public sealed record LauncherSettings
 {
+    public const int DefaultCheckIntervalMinutes = 60;
+    public static IReadOnlyList<int> SupportedCheckIntervalsMinutes { get; } =
+        Array.AsReadOnly<int>([30, 60, 180, 360, 720, 1440]);
+
     public bool CheckOnStartup { get; init; } = true;
     public bool PeriodicChecks { get; init; } = true;
+    private int checkIntervalMinutes = DefaultCheckIntervalMinutes;
+    public int CheckIntervalMinutes
+    {
+        get => checkIntervalMinutes;
+        init => checkIntervalMinutes = SupportedCheckIntervalsMinutes.Contains(value)
+            ? value : DefaultCheckIntervalMinutes;
+    }
 }
 
 public interface IReleaseService
