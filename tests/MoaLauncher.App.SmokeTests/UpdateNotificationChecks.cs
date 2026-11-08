@@ -20,6 +20,7 @@ internal sealed class UpdateNotificationChecks
     private readonly List<AppDefinition> definitions = [];
     private readonly Dictionary<string, ReleaseResult> releaseResults = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, InstalledApp> installed = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> releaseCalls = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> installCalls = [];
 
     internal IReleaseService ReleaseService { get; }
@@ -66,6 +67,11 @@ internal sealed class UpdateNotificationChecks
         var launcherVersion = launcherItem.Installed!.Version;
         releaseResults[launcherItem.Definition.Id] = new ReleaseResult(
             MakeLauncherRelease(launcherItem.Definition, ToReleaseTag(launcherVersion)), IsCached: false);
+        var originalVisible = GetField<ObservableCollection<AppItem>>(window, "visibleItems");
+        Require(!originalVisible.Contains(launcherItem) && originalVisible.Count == items.Count - 1,
+            "The built-in launcher appeared in the normal program list.");
+        Require(GetField<TextBlock>(window, "LibrarySummary").Text == $"{originalVisible.Count}개 프로그램",
+            "The normal program count included the built-in launcher.");
 
         items.Clear();
         items.AddRange(definitions.Select(definition => new AppItem(definition)));
@@ -192,6 +198,7 @@ internal sealed class UpdateNotificationChecks
             "The completed app remained in the update list or another app disappeared.");
 
         secondItem.Installed = MakeInstalled(secondItem.Definition, secondItem.Release!.Tag);
+        installed[secondItem.Definition.Id] = secondItem.Installed;
         app.HideMainWindow();
         RaiseBalloonTipClicked(notifyIcon);
         await WaitUntilAsync(() => window.IsVisible, window.Dispatcher, "late notification restoring the current list");
@@ -208,7 +215,11 @@ internal sealed class UpdateNotificationChecks
         System.Windows.Forms.NotifyIcon notifyIcon)
     {
         items.Clear();
+        var secondItem = new AppItem(definitions.Single(definition => definition.Id == "smoke-update-second"));
         items.Add(launcherItem);
+        items.Add(secondItem);
+        installed[secondItem.Definition.Id] = MakeInstalled(secondItem.Definition, "v1.5.0");
+        releaseResults[secondItem.Definition.Id] = new ReleaseResult(MakeRelease(secondItem.Definition, "v1.5.0"), IsCached: false);
         GetMethod(window, "ApplyFilter").Invoke(window, null);
         releaseResults[launcherItem.Definition.Id] = new ReleaseResult(
             MakeLauncherRelease(launcherItem.Definition, "v99.0.0"), IsCached: false);
@@ -224,23 +235,106 @@ internal sealed class UpdateNotificationChecks
         Require(notifyIcon.BalloonTipText.Contains(launcherItem.Name, StringComparison.Ordinal),
             "The launcher update was not included in the tray notification.");
 
+        InvokeClickHandler(window, "All_Click");
+        Require(!visible.Contains(launcherItem) && visible.Count == 1 && visible[0] == secondItem,
+            "The launcher appeared in the normal list while its update was pending.");
+        Require(GetField<TextBlock>(window, "LibrarySummary").Text == "1개 프로그램",
+            "The normal program count included the launcher update item.");
+        Require(!GetField<Button>(window, "UpdatesNav").Content.ToString()!.Contains("1", StringComparison.Ordinal),
+            "The regular update badge included the launcher update.");
+
+        InvokeClickHandler(window, "Installed_Click");
+        Require(!visible.Contains(launcherItem) && visible.Count == 1 && visible[0] == secondItem,
+            "The launcher appeared in the installed-app list.");
+        Require(GetField<TextBlock>(window, "LibrarySummary").Text == "1개 프로그램",
+            "The installed-app count included the launcher.");
+
+        InvokeClickHandler(window, "Updates_Click");
+        Require(!visible.Contains(launcherItem) && !visible.Contains(secondItem),
+            "The launcher was exposed in the regular updates list without a general app update.");
+        Require(GetField<TextBlock>(window, "LibrarySummary").Text == "0개 프로그램",
+            "The regular updates count included the launcher update.");
+
         app.HideMainWindow();
         RaiseBalloonTipClicked(notifyIcon);
-        await WaitUntilAsync(() => window.IsVisible && GetField<string>(window, "filter") == "updates" && visible.Contains(launcherItem),
-            window.Dispatcher, "self-update notification opening the update list");
+        await WaitUntilAsync(() => window.IsVisible &&
+            GetField<FrameworkElement>(window, "SettingsView").Visibility == Visibility.Visible &&
+            GetField<FrameworkElement>(window, "LauncherUpdatePanel").Visibility == Visibility.Visible,
+            window.Dispatcher, "self-update notification opening launcher settings");
         await window.Dispatcher.InvokeAsync(() =>
         {
             window.UpdateLayout();
-            GetField<ItemsControl>(window, "AppCards").UpdateLayout();
         }, DispatcherPriority.ApplicationIdle);
 
-        var launcherAction = FindActionButton(window, launcherItem.Definition.Id)
-            ?? throw new InvalidOperationException("Could not find the self-update action in the update list.");
+        var launcherPanel = GetField<FrameworkElement>(window, "LauncherUpdatePanel");
+        var launcherAction = GetField<Button>(window, "LauncherUpdateButton");
+        Require(ReferenceEquals(launcherPanel.DataContext, launcherItem),
+            "The launcher update panel was not bound to the built-in launcher item.");
         Require(launcherAction.Content as string == "업데이트 후 재시작" && launcherAction.IsEnabled,
-            "The self-update action was not rendered as an enabled update button.");
+            "The self-update panel did not expose its enabled update action.");
         Require(installCalls.Count == 1,
             "Opening the self-update notification executed the installer; the self-update button must remain untouched in this smoke test.");
+
+        var launcherCheck = GetField<Button>(window, "LauncherCheckButton");
+        Require(launcherCheck.IsEnabled, "The dedicated launcher version-check button was disabled.");
+        var launcherChecksBefore = GetReleaseCallCount(launcherItem.Definition.Id);
+        var appChecksBefore = GetReleaseCallCount(secondItem.Definition.Id);
+        launcherCheck.RaiseEvent(new RoutedEventArgs(Button.ClickEvent, launcherCheck));
+        await WaitUntilAsync(() => GetReleaseCallCount(launcherItem.Definition.Id) > launcherChecksBefore && !launcherItem.Busy,
+            window.Dispatcher, "dedicated launcher version check");
+        Require(GetReleaseCallCount(secondItem.Definition.Id) == appChecksBefore,
+            "The dedicated launcher check unexpectedly queried a regular app release.");
+
+        // Announcing an ordinary update together with a launcher update should open the regular update list.
+        installed[secondItem.Definition.Id] = MakeInstalled(secondItem.Definition, "v1.0.0");
+        secondItem.Installed = installed[secondItem.Definition.Id];
+        releaseResults[secondItem.Definition.Id] = new ReleaseResult(MakeRelease(secondItem.Definition, "v1.6.0"), IsCached: false);
+        releaseResults[launcherItem.Definition.Id] = new ReleaseResult(
+            MakeLauncherRelease(launcherItem.Definition, "v100.0.0"), IsCached: false);
+        await CheckAllAsync(window);
+        var mixedNotice = notifyIcon.BalloonTipText;
+        Require(mixedNotice.Contains("2개 프로그램 업데이트", StringComparison.Ordinal) &&
+                mixedNotice.Contains(secondItem.Name, StringComparison.Ordinal) &&
+                mixedNotice.Contains(launcherItem.Name, StringComparison.Ordinal),
+            "A mixed app and launcher update notification was not aggregated.");
+        Require(GetField<Button>(window, "SettingsNav").Content.ToString()!.Contains("새 버전", StringComparison.Ordinal),
+            "The settings navigation did not indicate an available launcher update.");
+
+        GetField<TextBox>(window, "SearchBox").Text = "혼합 알림 테스트 검색어";
+        app.HideMainWindow();
+        RaiseBalloonTipClicked(notifyIcon);
+        await WaitUntilAsync(() => window.IsVisible && GetField<string>(window, "filter") == "updates" && visible.Contains(secondItem),
+            window.Dispatcher, "mixed notification opening the regular app update list");
+        Require(!visible.Contains(launcherItem) && visible.Contains(secondItem),
+            "The mixed notification put the launcher into the regular app update list.");
+        Require(GetField<TextBox>(window, "SearchBox").Text.Length == 0,
+            "The mixed notification did not clear the regular app search filter.");
+        Require(GetField<TextBlock>(window, "StatusText").Text.Contains("설정", StringComparison.Ordinal),
+            "The mixed notification did not direct launcher updates to Settings.");
+
+        // The notification can be clicked after both releases are already installed.
+        installed[secondItem.Definition.Id] = MakeInstalled(secondItem.Definition, "v1.6.0");
+        installed[launcherItem.Definition.Id] = MakeInstalled(launcherItem.Definition, "v100.0.0");
+        launcherItem.Installed = installed[launcherItem.Definition.Id];
+        await CheckAllAsync(window);
+        Require(!secondItem.HasUpdate && !launcherItem.HasUpdate,
+            "The late-notification fixture still has an available update.");
+        app.HideMainWindow();
+        RaiseBalloonTipClicked(notifyIcon);
+        await WaitUntilAsync(() => window.IsVisible &&
+            GetField<FrameworkElement>(window, "SettingsView").Visibility == Visibility.Visible &&
+            GetField<FrameworkElement>(window, "LauncherUpdatePanel").Visibility == Visibility.Visible,
+            window.Dispatcher, "late launcher notification opening Settings");
+        await WaitUntilAsync(() => GetField<Button>(window, "LauncherUpdateButton").Visibility == Visibility.Collapsed,
+            window.Dispatcher, "completed launcher action binding");
+        Require(GetField<Button>(window, "LauncherUpdateButton").Visibility == Visibility.Collapsed &&
+                launcherItem.ActionText == "최신 버전" && !GetProperty<bool>(launcherItem, "CanAct"),
+            "A late launcher notification did not open the completed launcher status in Settings.");
+        Require(installCalls.Count == 1, "The launcher update action was executed during notification navigation.");
     }
+
+    private static void InvokeClickHandler(MainWindow window, string methodName) =>
+        GetMethod(window, methodName).Invoke(window, [window, new RoutedEventArgs()]);
 
     private static async Task SetNotificationsAsync(MainWindow window, bool enabled)
     {
@@ -268,6 +362,8 @@ internal sealed class UpdateNotificationChecks
             ?? throw new InvalidOperationException("CheckAllAsync did not return a Task.");
         await check;
     }
+
+    private int GetReleaseCallCount(string appId) => releaseCalls.TryGetValue(appId, out var count) ? count : 0;
 
     private static void RaiseBalloonTipClicked(System.Windows.Forms.NotifyIcon notifyIcon)
     {
@@ -405,6 +501,7 @@ internal sealed class UpdateNotificationChecks
         public Task<ReleaseResult> GetLatestAsync(AppDefinition app, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            owner.releaseCalls[app.Id] = owner.GetReleaseCallCount(app.Id) + 1;
             return owner.releaseResults.TryGetValue(app.Id, out var result)
                 ? Task.FromResult(result)
                 : Task.FromException<ReleaseResult>(new InvalidOperationException($"No smoke release configured for {app.Id}."));

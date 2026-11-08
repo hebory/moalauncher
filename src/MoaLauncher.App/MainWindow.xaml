@@ -139,6 +139,35 @@
     <ScrollViewer x:Name="SettingsView" Grid.Row="1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
       <StackPanel Margin="28,26" MaxWidth="760">
         <TextBlock Text="설정" FontSize="23" FontWeight="Bold" Margin="0,0,0,22"/>
+        <Border x:Name="LauncherUpdatePanel" Background="White" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1" CornerRadius="12" Padding="22" Margin="0,0,0,16">
+          <StackPanel>
+            <TextBlock Text="런처 정보 및 업데이트" FontSize="15" FontWeight="Bold" Margin="0,0,0,15"/>
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                <TextBlock Text="{Binding InstalledVersion, StringFormat='Moa Launcher {0}'}" FontSize="13" FontWeight="SemiBold"/>
+                <TextBlock Text="{Binding LatestText}" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,6,0,0"/>
+              </StackPanel>
+              <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+                <Button x:Name="LauncherCheckButton" Content="업데이트 확인" Click="LauncherCheck_Click"
+                        IsEnabled="{Binding IsEnabled, ElementName=RefreshButton}" FontSize="11" Padding="12,9"/>
+                <Button x:Name="LauncherUpdateButton" Content="{Binding ActionText}" Click="AppAction_Click"
+                        IsEnabled="{Binding CanAct}" Visibility="{Binding HasUpdate, Converter={StaticResource BoolVisibility}}"
+                        Style="{StaticResource PrimaryButton}" FontSize="11" Padding="12,9" Margin="8,0,0,0"/>
+              </WrapPanel>
+            </Grid>
+            <StackPanel Visibility="{Binding Busy, Converter={StaticResource BoolVisibility}}" Margin="0,14,0,0">
+              <TextBlock Text="{Binding ProgressText}" Foreground="{StaticResource MutedBrush}" FontSize="11"/>
+              <ProgressBar Value="{Binding Percent}" Margin="0,8,0,0"/>
+            </StackPanel>
+            <TextBlock Text="{Binding Error}" Foreground="#926B28" TextWrapping="Wrap" FontSize="11" Margin="0,12,0,0"
+                       Visibility="{Binding HasError, Converter={StaticResource BoolVisibility}}"/>
+            <Button Content="다운로드 취소" Click="Cancel_Click" HorizontalAlignment="Right" Margin="0,8,0,0"
+                    Style="{StaticResource GhostButton}" FontSize="11"
+                    Visibility="{Binding CanCancel, Converter={StaticResource BoolVisibility}}"/>
+          </StackPanel>
+        </Border>
         <Border Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="22" Margin="0,0,0,16">
           <StackPanel>
             <TextBlock Text="시작 및 종료" FontSize="15" FontWeight="Bold" Margin="0,0,0,20"/>
