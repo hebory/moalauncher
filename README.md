@@ -35,13 +35,18 @@ dotnet run --project tests/MoaLauncher.App.SmokeTests -c Release
 dotnet run --project tests/MoaLauncher.App.SmokeTests -c Release -- --background
 ```
 
-게시용 Windows x64 ZIP과 체크섬은 다음 명령으로 만듭니다.
+게시용 Windows x64 포터블 ZIP, 사용자별 설치 프로그램과 체크섬은 다음 명령으로 만듭니다. 버전은 `Directory.Build.props`의 `Version` 값을 사용합니다. Inno Setup 6이 기본 경로에 없으면 컴파일러 경로를 지정합니다.
 
 ```powershell
 ./scripts/Publish.ps1
+# 또는 ./scripts/Publish.ps1 -IsccPath 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
 ```
 
-산출물은 `artifacts/distribution/`에 생성됩니다. 이 포터블 ZIP은 .NET 8 런타임을 포함하므로 사용자의 PC에 .NET 설치가 필요하지 않습니다. ZIP을 풀고 `MoaLauncher.exe`를 실행하세요. GitHub Action의 Windows 빌드·테스트는 커밋에서 실행되고 `v*` 태그가 게시용 ZIP, SHA-256 및 `SHA256SUMS.txt`를 GitHub Release에 첨부합니다.
+산출물은 `artifacts/distribution/`에 생성됩니다. `moa-launcher-<버전>-windows-x64.zip`은 별도 설치가 필요 없는 포터블 배포이고, `MoaLauncher-<버전>-Setup-x64.exe`는 현재 사용자 전용 설치 프로그램입니다. 설치기는 `%LOCALAPPDATA%\Programs\MoaLauncher`에 설치하고 시작 메뉴 바로 가기를 만들며, 바탕 화면 바로 가기는 선택 항목입니다. 설치 완료 후 런처를 실행합니다. 설치기는 `%LOCALAPPDATA%\MoaLauncher`의 설정·카탈로그·로그 등 사용자 데이터를 삭제하지 않습니다. Windows 시작 시 자동 실행은 등록하지 않습니다. 이미 실행 중인 런처를 설치기가 강제로 종료하지 않으므로, 실행 파일 잠금으로 설치가 실패하면 런처를 직접 닫고 설치를 다시 진행하세요.
+
+두 배포 형식은 각각 `.sha256` 파일이 생성되며 `SHA256SUMS.txt`에 두 파일의 SHA-256이 함께 기록됩니다. 내려받은 파일은 실행 전에 체크섬을 확인하세요. 포터블 ZIP은 .NET 8 런타임을 포함하므로 사용자의 PC에 .NET 설치가 필요하지 않습니다.
+
+GitHub Action은 Windows 빌드·테스트와 정상/백그라운드 실행 스모크 확인을 마친 뒤 `v*` 태그에서 ZIP, 설치기와 체크섬 파일을 GitHub Release에 첨부합니다. 자동 생성되는 릴리스 설명은 한국어입니다. 기존 릴리스에 동일한 파일명이 있으면 덮어쓰지 않고 실패합니다. 릴리스는 공개 저장소의 안정 버전만 사용하세요.
 
 ## 새 앱 등록하기
 
@@ -53,9 +58,11 @@ dotnet run --project tests/MoaLauncher.App.SmokeTests -c Release -- --background
 
 ## 데이터 위치와 업데이트 안전성
 
-카탈로그 설정, 설치 상태, GitHub 캐시, 다운로드 중인 파일, 로그는 `%LOCALAPPDATA%\MoaLauncher`에 저장됩니다. 기본 카탈로그는 앱에 포함되고 사용자 카탈로그는 기본 앱 항목을 덮어쓰거나 새 앱을 추가합니다. 설정 화면에서 데이터 폴더를 열고, 앱 상세 보기에서 설치 폴더, 릴리스 정보와 실행 버튼을 찾을 수 있습니다.
+카탈로그 설정, 설치 상태, GitHub 캐시, 다운로드 중인 파일, 로그는 `%LOCALAPPDATA%\MoaLauncher`에 저장됩니다. 기본 카탈로그는 앱에 포함되고 사용자 카탈로그는 기본 앱 항목을 덮어쓰거나 새 앱을 추가합니다. Moa Launcher 항목은 내장 항목이라 사용자 카탈로그로 덮어쓰거나 편집할 수 없습니다.
 
-포터블 ZIP은 새 버전을 별도 폴더에 압축 해제한 뒤 설치 상태를 전환합니다. 다운로드 취소나 검증 실패에서는 현재 설치를 보존합니다. Inno Setup은 프로그램의 설치 파일이 직접 설치하므로 설치 중단이나 프로그램별 쓰기 실패는 자동 복구되지 않을 수 있습니다. 두 형식 모두 업데이트 전에 대상 프로그램이 실행 중인지 확인합니다. Moa Launcher 자체 업데이트는 아직 지원하지 않습니다.
+앱 목록의 **Moa Launcher** 항목에는 현재 실행 중인 런처 버전이 표시됩니다. 새 버전이 있으면 **업데이트 후 재시작**을 선택할 수 있습니다. 설정한 업데이트 확인 간격과 알림 켜기/끄기는 다른 앱과 공유합니다. 자체 업데이트는 다른 설치나 다운로드가 진행 중일 때 시작할 수 없습니다. 체크섬 확인 후 설치하고 런처를 다시 시작합니다.
+
+포터블 ZIP은 새 버전을 별도 폴더에 압축 해제한 뒤 설치 상태를 전환합니다. 다운로드 취소나 검증 실패에서는 현재 설치를 보존합니다. Inno Setup은 프로그램의 설치 파일이 직접 설치하므로 설치 중단이나 프로그램별 쓰기 실패는 자동 복구되지 않을 수 있습니다. 두 형식 모두 업데이트 전에 대상 프로그램이 실행 중인지 확인합니다. 자체 업데이트 설치에 실패하면 기존 실행 파일 복구를 시도하며, 복구가 실패한 경우 백업 파일과 로그를 `%LOCALAPPDATA%\MoaLauncher\self-update\<작업 ID>` 아래에 남깁니다. 설치기의 Windows 등록 정보까지 완전히 되돌린다고 보장하지는 않습니다.
 
 ZIP 앱은 사용자 설정을 AppData 같은 별도 위치에 저장하는 구성을 권장합니다. 실행 파일 옆에 저장한 설정은 이전 버전 폴더에 남으며 새 버전으로 자동 복사하지 않습니다. Inno 설치가 시작되면 취소는 설치 프로그램 창에서 진행합니다.
 
