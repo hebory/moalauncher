@@ -37,11 +37,12 @@ public partial class AppDetailsWindow : Window
 
     private void Launch_Click(object sender, RoutedEventArgs e)
     {
-        if (item.IsInstalled && item.CanAct) launch(item);
+        if (item.CanLaunch && item.CanAct) launch(item);
     }
 
     private void Edit_Click(object sender, RoutedEventArgs e)
     {
+        if (!item.CanEdit) return;
         Close();
         edit(item);
     }

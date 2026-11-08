@@ -27,6 +27,8 @@ internal sealed class UpdateNotificationChecks
 
     internal UpdateNotificationChecks()
     {
+        var launcher = SelfUpdateService.Definition;
+        var launcherVersion = ReadLauncherVersion();
         var target = CreateDefinition("smoke-update-target", "테스트 대상 앱", "smoke/target");
         var second = CreateDefinition("smoke-update-second", "두 번째 테스트 앱", "smoke/second");
         var cached = CreateDefinition("smoke-update-cached", "캐시된 테스트 앱", "smoke/cached");
@@ -39,12 +41,14 @@ internal sealed class UpdateNotificationChecks
         installed[second.Id] = MakeInstalled(second, "v1.0.0");
         installed[cached.Id] = MakeInstalled(cached, "v1.0.0");
         installed[invalidAsset.Id] = MakeInstalled(invalidAsset, "v1.0.0");
+        installed[launcher.Id] = MakeInstalled(launcher, launcherVersion);
 
         releaseResults[target.Id] = new ReleaseResult(MakeRelease(target, "v2.0.0"), IsCached: false);
         releaseResults[second.Id] = new ReleaseResult(MakeRelease(second, "v1.5.0"), IsCached: false);
         releaseResults[cached.Id] = new ReleaseResult(MakeRelease(cached, "v2.0.0"), IsCached: true);
         releaseResults[uninstalled.Id] = new ReleaseResult(MakeRelease(uninstalled, "v2.0.0"), IsCached: false);
         releaseResults[invalidAsset.Id] = new ReleaseResult(MakeRelease(invalidAsset, "v2.0.0", includeMatchingAsset: false), IsCached: false);
+        releaseResults[launcher.Id] = new ReleaseResult(MakeLauncherRelease(launcher, ToReleaseTag(launcherVersion)), IsCached: false);
 
         ReleaseService = new FakeReleaseService(this);
         InstallationService = new FakeInstallationService(this);
@@ -53,6 +57,16 @@ internal sealed class UpdateNotificationChecks
     internal async Task RunAsync(App app, MainWindow window)
     {
         var items = GetField<List<AppItem>>(window, "items");
+        var launcherItem = items.SingleOrDefault(item => item.Definition.Id == SelfUpdateService.Definition.Id)
+            ?? throw new InvalidOperationException("The built-in Moa Launcher item was not added to the library.");
+        Require(GetProperty<bool>(launcherItem, "IsLauncher"), "The built-in launcher was not marked as a self-update item.");
+        Require(launcherItem.Installed is not null, "The built-in launcher did not detect its current installation.");
+        Require(!GetProperty<bool>(launcherItem, "CanEdit") && !GetProperty<bool>(launcherItem, "CanLaunch"),
+            "The built-in launcher still exposes app editing or launch actions.");
+        var launcherVersion = launcherItem.Installed!.Version;
+        releaseResults[launcherItem.Definition.Id] = new ReleaseResult(
+            MakeLauncherRelease(launcherItem.Definition, ToReleaseTag(launcherVersion)), IsCached: false);
+
         items.Clear();
         items.AddRange(definitions.Select(definition => new AppItem(definition)));
         GetMethod(window, "ApplyFilter").Invoke(window, null);
@@ -184,7 +198,48 @@ internal sealed class UpdateNotificationChecks
         Require(!visible.Contains(targetItem) && !visible.Contains(secondItem) && installCalls.Count == 1,
             "A late notification restored completed updates or started another install.");
 
-        Console.WriteLine("PASS: notification settings and persistence, silent checks, aggregated notifications, exclusions, deduplication, tray click navigation, and selected-app update.");
+        await CheckLauncherSelfUpdateAsync(app, window, items, visible, launcherItem, launcherVersion, notifyIcon);
+
+        Console.WriteLine("PASS: notification settings, app updates, built-in launcher notice navigation, and fake app installation.");
+    }
+
+    private async Task CheckLauncherSelfUpdateAsync(App app, MainWindow window, List<AppItem> items,
+        ObservableCollection<AppItem> visible, AppItem launcherItem, string currentVersion,
+        System.Windows.Forms.NotifyIcon notifyIcon)
+    {
+        items.Clear();
+        items.Add(launcherItem);
+        GetMethod(window, "ApplyFilter").Invoke(window, null);
+        releaseResults[launcherItem.Definition.Id] = new ReleaseResult(
+            MakeLauncherRelease(launcherItem.Definition, "v99.0.0"), IsCached: false);
+
+        await CheckAllAsync(window);
+        Require(launcherItem.Installed?.Version == currentVersion,
+            "The self-update check changed the detected installed launcher version.");
+        Require(launcherItem.HasUpdate && launcherItem.ActionText == "업데이트 후 재시작",
+            "A newer launcher release did not expose the self-update action.");
+        Require(!GetProperty<bool>(launcherItem, "CanEdit") && !GetProperty<bool>(launcherItem, "CanLaunch"),
+            "The self-update item exposed app editing or normal launch while an update was available.");
+        Require(installCalls.Count == 1, "Checking for the launcher update unexpectedly installed a program.");
+        Require(notifyIcon.BalloonTipText.Contains(launcherItem.Name, StringComparison.Ordinal),
+            "The launcher update was not included in the tray notification.");
+
+        app.HideMainWindow();
+        RaiseBalloonTipClicked(notifyIcon);
+        await WaitUntilAsync(() => window.IsVisible && GetField<string>(window, "filter") == "updates" && visible.Contains(launcherItem),
+            window.Dispatcher, "self-update notification opening the update list");
+        await window.Dispatcher.InvokeAsync(() =>
+        {
+            window.UpdateLayout();
+            GetField<ItemsControl>(window, "AppCards").UpdateLayout();
+        }, DispatcherPriority.ApplicationIdle);
+
+        var launcherAction = FindActionButton(window, launcherItem.Definition.Id)
+            ?? throw new InvalidOperationException("Could not find the self-update action in the update list.");
+        Require(launcherAction.Content as string == "업데이트 후 재시작" && launcherAction.IsEnabled,
+            "The self-update action was not rendered as an enabled update button.");
+        Require(installCalls.Count == 1,
+            "Opening the self-update notification executed the installer; the self-update button must remain untouched in this smoke test.");
     }
 
     private static async Task SetNotificationsAsync(MainWindow window, bool enabled)
@@ -273,6 +328,36 @@ internal sealed class UpdateNotificationChecks
             DateTimeOffset.UtcNow, assets);
     }
 
+    private static AppRelease MakeLauncherRelease(AppDefinition definition, string tag)
+    {
+        Require(definition.Packages.Any(package => package.Architecture == "x64" && package.AssetPattern == SelfUpdateService.InstallerPattern),
+            "The built-in launcher package does not match the self-update installer pattern.");
+        var name = $"MoaLauncher-{tag}-Setup-x64.exe";
+        var asset = new ReleaseAsset(name,
+            new Uri($"https://github.com/{SelfUpdateService.Repository}/releases/download/{tag}/{name}"), 1024, null);
+        return new AppRelease(tag, $"Moa Launcher {tag}", "스모크 테스트 런처 릴리스",
+            new Uri($"https://github.com/{SelfUpdateService.Repository}/releases/tag/{tag}"), DateTimeOffset.UtcNow, [asset]);
+    }
+
+    private static string ToReleaseTag(string version) => version.StartsWith("v", StringComparison.OrdinalIgnoreCase)
+        ? version : "v" + version;
+
+    private static string ReadLauncherVersion()
+    {
+        var method = typeof(App).GetMethod("GetVersion", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+            binder: null, types: Type.EmptyTypes, modifiers: null);
+        if (method?.Invoke(null, null) is string methodVersion && !string.IsNullOrWhiteSpace(methodVersion)) return methodVersion;
+
+        var property = typeof(App).GetProperty("CurrentVersion", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        if (property?.GetValue(null) is string propertyVersion && !string.IsNullOrWhiteSpace(propertyVersion)) return propertyVersion;
+
+        var productVersion = System.Diagnostics.FileVersionInfo.GetVersionInfo(typeof(MainWindow).Assembly.Location).ProductVersion;
+        if (!string.IsNullOrWhiteSpace(productVersion)) return productVersion.Split('+')[0];
+        var assemblyVersion = typeof(MainWindow).Assembly.GetName().Version
+            ?? throw new InvalidOperationException("Could not determine the Moa Launcher version for its self-update smoke test.");
+        return $"{assemblyVersion.Major}.{assemblyVersion.Minor}.{Math.Max(assemblyVersion.Build, 0)}";
+    }
+
     private static InstalledApp MakeInstalled(AppDefinition definition, string version) =>
         new(definition.Id, version, Path.Combine(Path.GetTempPath(), "MoaSmoke", definition.Id, "Moa.exe"),
             Path.Combine(Path.GetTempPath(), "MoaSmoke", definition.Id), "zip", DateTimeOffset.UtcNow);
@@ -295,6 +380,15 @@ internal sealed class UpdateNotificationChecks
         return field.GetValue(instance) is T value
             ? value
             : throw new InvalidCastException($"Field {name} is not {typeof(T).Name}.");
+    }
+
+    private static T GetProperty<T>(object instance, string name)
+    {
+        var property = instance.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            ?? throw new MissingMemberException(instance.GetType().FullName, name);
+        return property.GetValue(instance) is T value
+            ? value
+            : throw new InvalidCastException($"Property {name} is not {typeof(T).Name}.");
     }
 
     private static MethodInfo GetMethod(object instance, string name) =>

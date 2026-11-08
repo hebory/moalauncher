@@ -112,7 +112,7 @@
                   Click="Folder_Click" IsEnabled="{Binding IsInstalled}"
                   Style="{StaticResource GhostButton}" Padding="11,8" Margin="0,0,7,7"
                   AutomationProperties.Name="설치 폴더 열기"/>
-          <Button Content="프로그램 설정" Click="Edit_Click"
+          <Button Content="프로그램 설정" Click="Edit_Click" Visibility="{Binding CanEdit, Converter={StaticResource BoolVisibility}}"
                   Style="{StaticResource GhostButton}" Padding="11,8" Margin="0,0,0,7"
                   AutomationProperties.Name="프로그램 설정 열기"/>
         </WrapPanel>
@@ -125,7 +125,7 @@
         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="10"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
         <Button Grid.Column="1" Content="닫기" Click="Close_Click" IsCancel="True"
                 Style="{StaticResource GhostButton}" MinWidth="70" AutomationProperties.Name="상세 정보 닫기"/>
-        <Button Grid.Column="3" Content="앱 실행 ↗" Click="Launch_Click"
+        <Button Grid.Column="3" Content="앱 실행 ↗" Click="Launch_Click" Visibility="{Binding CanLaunch, Converter={StaticResource BoolVisibility}}"
                 MinWidth="112"
                 AutomationProperties.Name="설치된 프로그램 실행">
           <Button.Style>

@@ -8,6 +8,9 @@ using System.Windows.Controls;
 using System.Windows.Threading;
 using System.Windows.Forms;
 using MoaLauncher.App;
+using MoaLauncher.Core;
+using System.Net.Http;
+using System.Text.Json;
 
 namespace MoaLauncher.App.SmokeTests;
 
@@ -19,6 +22,8 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Length == 2 && args[0] == "--verify-published-self-update")
+            return VerifyPublishedSelfUpdateAsync(args[1]).GetAwaiter().GetResult();
         if (args.Contains("--activation-probe", StringComparer.OrdinalIgnoreCase))
             return RunActivationProbe();
 
@@ -74,6 +79,24 @@ internal static class Program
             if (Directory.Exists(dataDirectory)) Directory.Delete(dataDirectory, recursive: true);
         }
         return Environment.ExitCode;
+    }
+
+    private static async Task<int> VerifyPublishedSelfUpdateAsync(string directory)
+    {
+        try
+        {
+            directory = Path.GetFullPath(directory);
+            using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromMinutes(15) };
+            var releases = new GitHubReleaseService(http, Path.Combine(directory, "cache"));
+            var release = await releases.GetLatestAsync(SelfUpdateService.Definition);
+            if (release.IsCached) throw new InvalidOperationException("A live release response is required.");
+            var prepared = await new SelfUpdateService(http, directory).PrepareAsync(release.Release, "0.1.0");
+            var json = JsonSerializer.Serialize(prepared, new JsonSerializerOptions { WriteIndented = true });
+            await File.WriteAllTextAsync(Path.Combine(directory, "verified-installer.json"), json);
+            Console.WriteLine(json);
+            return 0;
+        }
+        catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
     }
 
     private static int RunActivationProbe()

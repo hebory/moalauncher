@@ -172,7 +172,7 @@
         <DockPanel Margin="0,14,0,0">
           <Button DockPanel.Dock="Right" Content="런처 종료" Click="Exit_Click"
                   Style="{StaticResource GhostButton}" FontSize="11" AutomationProperties.Name="런처 완전히 종료"/>
-          <TextBlock Text="Moa Launcher 0.1.0" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center"/>
+          <TextBlock x:Name="LauncherVersionText" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center"/>
         </DockPanel>
       </StackPanel>
     </ScrollViewer>

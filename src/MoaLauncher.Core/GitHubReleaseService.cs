@@ -21,7 +21,7 @@ public sealed class GitHubReleaseService(HttpClient client, string cacheDirector
         var cached = await ReadCacheAsync(cachePath, cancellationToken);
         using var request = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/repos/{app.Repository}/releases/latest");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
-        request.Headers.UserAgent.ParseAdd("MoaLauncher/0.1.0");
+        request.Headers.UserAgent.ParseAdd($"MoaLauncher/{typeof(GitHubReleaseService).Assembly.GetName().Version?.ToString(3) ?? "0.0.0"}");
         request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
         if (cached?.ETag is { Length: > 0 } etag && EntityTagHeaderValue.TryParse(etag, out var parsedTag))
             request.Headers.IfNoneMatch.Add(parsedTag);

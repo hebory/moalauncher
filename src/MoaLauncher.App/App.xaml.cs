@@ -23,12 +23,22 @@ public partial class App : Application
     internal bool IsExiting { get; private set; }
     public static string DataDirectory { get; private set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MoaLauncher");
 
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        var helperIndex = Array.IndexOf(e.Args, "--apply-self-update");
+        if (helperIndex >= 0)
+        {
+            IsExiting = true;
+            var result = helperIndex + 1 < e.Args.Length
+                ? await SelfUpdateCoordinator.RunHelperAsync(e.Args[helperIndex + 1]) : 1;
+            Shutdown(result);
+            return;
+        }
         var startInBackground = e.Args.Contains(WindowsStartupRegistration.BackgroundArgument, StringComparer.OrdinalIgnoreCase);
         var index = Array.IndexOf(e.Args, "--data-dir");
         if (index >= 0 && index + 1 < e.Args.Length) DataDirectory = Path.GetFullPath(e.Args[index + 1]);
+        DataDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(DataDirectory));
         var identity = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(DataDirectory.ToUpperInvariant())))[..16];
         // Create the event before the mutex so a second launch cannot lose an early activation request.
         activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\MoaLauncher-Activate-" + identity);

@@ -275,7 +275,7 @@ public sealed class InstallationService : IInstallationService
         }
     }
 
-    private async Task<string> GetExpectedSha256Async(AppRelease release, ReleaseAsset asset, string repository, CancellationToken cancellationToken)
+    internal async Task<string> GetExpectedSha256Async(AppRelease release, ReleaseAsset asset, string repository, CancellationToken cancellationToken)
     {
         if (asset.Sha256 is { } direct && IsSha256(direct)) return direct.ToUpperInvariant();
         var checksumAsset = release.Assets.FirstOrDefault(a => a.Name.Equals(asset.Name + ".sha256", StringComparison.OrdinalIgnoreCase));

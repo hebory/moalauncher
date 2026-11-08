@@ -19,6 +19,8 @@ public partial class MainWindow : Window
     private readonly IReleaseService releases;
     private readonly IInstallationService installations;
     private readonly IStartupRegistration startupRegistration;
+    private readonly SelfUpdateService selfUpdates;
+    internal static string LauncherVersion => typeof(App).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
     private readonly List<AppItem> items = [];
     private readonly ObservableCollection<AppItem> visibleItems = [];
     private readonly Dictionary<string, CancellationTokenSource> operations = [];
@@ -47,6 +49,8 @@ public partial class MainWindow : Window
             .ToList();
         releases = releaseService ?? new GitHubReleaseService(http, Path.Combine(App.DataDirectory, "cache"));
         installations = installationService ?? new InstallationService(http, App.DataDirectory);
+        selfUpdates = new SelfUpdateService(http, App.DataDirectory);
+        LauncherVersionText.Text = $"Moa Launcher {LauncherVersion}";
         AppCards.ItemsSource = visibleItems;
         DataPathText.Text = App.DataDirectory;
         Loaded += async (_, _) => await EnsureInitializedAsync();
@@ -82,6 +86,7 @@ public partial class MainWindow : Window
             ReadStartupSetting();
             ApplyCheckSchedule();
             if (settings.CheckOnStartup) await CheckAllAsync();
+            ReadSelfUpdateResult();
         }
         catch (Exception ex) { ShowError(ex); }
         finally { initializationStarted = false; }
@@ -97,7 +102,14 @@ public partial class MainWindow : Window
         }
         var merged = bundled.Apps.ToDictionary(a => a.Id, StringComparer.OrdinalIgnoreCase);
         foreach (var app in overrides.Apps) merged[app.Id] = app;
+        merged.Remove(SelfUpdateService.Definition.Id);
         items.Clear();
+        items.Add(new AppItem(SelfUpdateService.Definition)
+        {
+            IsLauncher = true,
+            Installed = new InstalledApp(SelfUpdateService.Definition.Id, LauncherVersion,
+                Path.Combine(AppContext.BaseDirectory, "MoaLauncher.exe"), AppContext.BaseDirectory, "launcher", DateTimeOffset.UtcNow)
+        });
         foreach (var definition in merged.Values)
         {
             var item = new AppItem(definition);
@@ -139,7 +151,7 @@ public partial class MainWindow : Window
         item.ProgressText = "새 버전 확인 중…";
         try
         {
-            item.Installed = await installations.FindInstalledAsync(item.Definition, ct);
+            if (!item.IsLauncher) item.Installed = await installations.FindInstalledAsync(item.Definition, ct);
             if (!item.NeedsConnection)
             {
                 var result = await releases.GetLatestAsync(item.Definition, ct);
@@ -187,6 +199,14 @@ public partial class MainWindow : Window
     private async void AppAction_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not AppItem item || item.Busy) return;
+        if (operations.ContainsKey(SelfUpdateService.Definition.Id))
+        { StatusText.Text = "런처 업데이트가 끝난 뒤 다시 시도하세요."; return; }
+        if (item.IsLauncher)
+        {
+            if (item.HasUpdate) await UpdateLauncherAsync(item);
+            else await CheckAllAsync();
+            return;
+        }
         if (item.NeedsConnection) { await EditAppAsync(item); return; }
         if (item.IsInstalled && !item.HasUpdate) { LaunchItem(item); return; }
         if (item.Release is null)
@@ -232,7 +252,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (item.Installed is null || item.Busy) return;
+            if (!item.CanLaunch || item.Installed is null || item.Busy) return;
             installations.Launch(item.Installed);
             StatusText.Text = $"{item.Name} 실행을 요청했습니다.";
         }
@@ -308,9 +328,12 @@ public partial class MainWindow : Window
     private async void AddApp_Click(object sender, RoutedEventArgs e) => await EditAppAsync(null);
     private async Task EditAppAsync(AppItem? item)
     {
+        if (item?.IsLauncher == true) return;
         if (checking || items.Any(i => i.Busy)) { StatusText.Text = "진행 중인 작업이 끝나면 프로그램 설정을 변경할 수 있습니다."; return; }
         var dialog = new AppEditorWindow(item?.Definition) { Owner = this };
         if (dialog.ShowDialog() != true || dialog.Result is null) return;
+        if (dialog.Result.Id.Equals(SelfUpdateService.Definition.Id, StringComparison.OrdinalIgnoreCase))
+        { StatusText.Text = "모아 런처 항목은 자동으로 관리합니다. 다른 프로그램 ID를 사용하세요."; return; }
         if (item is null && items.Any(i => i.Definition.Id.Equals(dialog.Result.Id, StringComparison.OrdinalIgnoreCase)))
         { StatusText.Text = "이미 등록된 ID입니다. 해당 앱의 ‘프로그램 설정’에서 변경하세요."; return; }
         try
@@ -418,6 +441,8 @@ public partial class MainWindow : Window
         try
         {
             var imported = await CatalogService.LoadAsync(dialog.FileName);
+            if (imported.Apps.Any(app => app.Id.Equals(SelfUpdateService.Definition.Id, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidDataException("모아 런처 항목은 카탈로그로 변경할 수 없습니다.");
             var summary = string.Join("\n", imported.Apps.Take(10).Select(a => $"• {a.Name} — {a.Repository}"));
             if (MessageBox.Show(this, $"다음 배포자의 프로그램 {imported.Apps.Count}개를 등록합니다.\n같은 ID의 프로그램 설정은 변경됩니다.\n\n{summary}", "카탈로그 가져오기", MessageBoxButton.OKCancel, MessageBoxImage.Information) != MessageBoxResult.OK) return;
             var merged = overrides.Apps.ToDictionary(a => a.Id, StringComparer.OrdinalIgnoreCase);
@@ -432,9 +457,62 @@ public partial class MainWindow : Window
     {
         var dialog = new SaveFileDialog { Filter = "앱 카탈로그 (*.json)|*.json", FileName = "moa-apps.json" };
         if (dialog.ShowDialog(this) != true) return;
-        try { await CatalogService.SaveAsync(dialog.FileName, new AppCatalog { Apps = items.Select(i => i.Definition).ToList() }); StatusText.Text = "카탈로그를 내보냈습니다."; }
+        try { await CatalogService.SaveAsync(dialog.FileName, new AppCatalog { Apps = items.Where(i => !i.IsLauncher).Select(i => i.Definition).ToList() }); StatusText.Text = "카탈로그를 내보냈습니다."; }
         catch (Exception ex) { ShowError(ex); }
     }
+    private async Task UpdateLauncherAsync(AppItem item)
+    {
+        if (checking || operations.Count > 0)
+        { StatusText.Text = "다른 작업이 끝난 뒤 런처를 업데이트하세요."; return; }
+        using var cancellation = new CancellationTokenSource();
+        operations[item.Definition.Id] = cancellation;
+        item.Busy = true;
+        item.CanCancel = true;
+        item.Error = null;
+        item.Percent = 0;
+        RefreshButton.IsEnabled = false;
+        item.Refresh();
+        try
+        {
+            var fresh = await releases.GetLatestAsync(SelfUpdateService.Definition, cancellation.Token);
+            if (fresh.IsCached) throw new IOException("인터넷 연결을 확인한 뒤 런처 업데이트를 다시 시도하세요.");
+            item.Release = fresh.Release;
+            item.IsCached = false;
+            if (!item.HasUpdate) { StatusText.Text = "이미 최신 런처 버전입니다."; return; }
+            var progress = new Progress<InstallProgress>(p => { item.ProgressText = p.Stage; item.Percent = p.Percent; });
+            var prepared = await selfUpdates.PrepareAsync(fresh.Release, LauncherVersion, progress, cancellation.Token);
+            item.CanCancel = false;
+            item.ProgressText = "런처를 업데이트하고 다시 시작합니다…";
+            item.Refresh();
+            await SelfUpdateCoordinator.PrepareHandoffAsync(prepared, AppContext.BaseDirectory, App.DataDirectory, !IsVisible, cancellation.Token);
+            operations.Remove(item.Definition.Id);
+            ((App)Application.Current).RequestExit();
+        }
+        catch (OperationCanceledException) { StatusText.Text = "런처 업데이트를 취소했습니다."; }
+        catch (Exception ex) { item.Error = ex.Message; ShowError(ex); }
+        finally
+        {
+            operations.Remove(item.Definition.Id);
+            item.CanCancel = false;
+            item.Busy = false;
+            RefreshButton.IsEnabled = !checking && operations.Count == 0;
+            ApplyFilter();
+        }
+    }
+
+    private void ReadSelfUpdateResult()
+    {
+        var path = Path.Combine(App.DataDirectory, "self-update-result.json");
+        if (!File.Exists(path)) return;
+        try
+        {
+            using var result = JsonDocument.Parse(File.ReadAllText(path));
+            if (result.RootElement.TryGetProperty("Message", out var message)) StatusText.Text = message.GetString() ?? "";
+            File.Move(path, path + ".last", true);
+        }
+        catch (Exception ex) { App.Log(ex); }
+    }
+
     private void ShowError(Exception ex) { App.Log(ex); StatusText.Text = ex.Message; }
     private void Exit_Click(object sender, RoutedEventArgs e) => ((App)Application.Current).RequestExit();
     private void OnClosing(object? sender, CancelEventArgs e)
