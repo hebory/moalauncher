@@ -9,6 +9,8 @@
       "accentColor": "#8BA3FF",
       "monogram": "Mv",
       "repository": "hebory/moaview",
+      "iconUrl": "https://raw.githubusercontent.com/hebory/moaview/main/icon.png",
+      "coverUrl": "https://raw.githubusercontent.com/hebory/moaview/main/cover.png",
       "packages": [
         {
           "architecture": "x64",

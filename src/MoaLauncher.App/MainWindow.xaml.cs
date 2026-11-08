@@ -20,6 +20,7 @@ public partial class MainWindow : Window
     private readonly IInstallationService installations;
     private readonly IStartupRegistration startupRegistration;
     private readonly SelfUpdateService selfUpdates;
+    private readonly AppArtworkService artwork;
     internal static string LauncherVersion => typeof(App).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
     private readonly List<AppItem> items = [];
     private readonly ObservableCollection<AppItem> visibleItems = [];
@@ -50,6 +51,7 @@ public partial class MainWindow : Window
         releases = releaseService ?? new GitHubReleaseService(http, Path.Combine(App.DataDirectory, "cache"));
         installations = installationService ?? new InstallationService(http, App.DataDirectory);
         selfUpdates = new SelfUpdateService(http, App.DataDirectory);
+        artwork = new AppArtworkService(http, Path.Combine(App.DataDirectory, "cache", "artwork"));
         LauncherVersionText.Text = $"Moa Launcher {LauncherVersion}";
         AppCards.ItemsSource = visibleItems;
         DataPathText.Text = App.DataDirectory;
@@ -101,7 +103,14 @@ public partial class MainWindow : Window
             catch (Exception ex) { ShowError(new InvalidDataException("저장한 카탈로그를 읽지 못해 기본 목록을 표시합니다. 데이터 폴더의 catalog.json을 확인하세요.", ex)); }
         }
         var merged = bundled.Apps.ToDictionary(a => a.Id, StringComparer.OrdinalIgnoreCase);
-        foreach (var app in overrides.Apps) merged[app.Id] = app;
+        foreach (var app in overrides.Apps)
+        {
+            // Older saved entries can inherit newly supplied publisher artwork.
+            merged[app.Id] = merged.TryGetValue(app.Id, out var bundledApp) &&
+                app.Repository.Equals(bundledApp.Repository, StringComparison.OrdinalIgnoreCase)
+                ? app with { IconUrl = app.IconUrl ?? bundledApp.IconUrl, CoverUrl = app.CoverUrl ?? bundledApp.CoverUrl }
+                : app;
+        }
         merged.Remove(SelfUpdateService.Definition.Id);
         items.Clear();
         items.Add(new AppItem(SelfUpdateService.Definition)
@@ -118,6 +127,22 @@ public partial class MainWindow : Window
             items.Add(item);
         }
         ApplyFilter();
+        _ = LoadArtworkAsync(items.ToArray(), lifetime.Token);
+    }
+
+    private async Task LoadArtworkAsync(IEnumerable<AppItem> apps, CancellationToken cancellationToken)
+    {
+        // Artwork is optional and does not delay the catalog, release checks, or app actions.
+        foreach (var item in apps)
+        {
+            try
+            {
+                item.IconImage = await artwork.LoadAsync(item.Definition.IconUrl, cancellationToken);
+                item.CoverImage = await artwork.LoadAsync(item.Definition.CoverUrl, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
+            catch (Exception ex) { App.Log(ex); }
+        }
     }
 
     private void ApplyFilter()

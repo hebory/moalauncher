@@ -132,6 +132,7 @@ internal static class Program
         }
 
         StartupRegistrationChecks.Run();
+        await ArtworkChecks.RunAsync(dataDirectory);
         await CheckStartupSettingToggleAsync(window, startupRegistration);
 
         if (!startsInBackground)

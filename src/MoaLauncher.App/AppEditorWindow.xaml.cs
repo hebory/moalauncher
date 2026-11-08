@@ -51,10 +51,13 @@ public partial class AppEditorWindow : Window
             // Preserve the other architectures of imported multi-platform entries.
             var packages = original?.Packages.Where(p => p.Architecture != package.Architecture).ToList() ?? [];
             packages.Add(package);
+            var sameRepository = original is not null && string.Equals(original.Repository, repository, StringComparison.OrdinalIgnoreCase);
             Result = (original ?? new AppDefinition()) with
             {
                 Id = IdInput.Text.Trim(), Name = name, Description = DescriptionInput.Text.Trim(), Repository = repository,
-                Monogram = original?.Monogram ?? (name.Length > 0 ? name[..1] : "M"), Packages = packages
+                Monogram = original?.Monogram ?? (name.Length > 0 ? name[..1] : "M"), Packages = packages,
+                IconUrl = sameRepository ? original!.IconUrl : null,
+                CoverUrl = sameRepository ? original!.CoverUrl : null
             };
             CatalogService.Validate(new AppCatalog { Apps = [Result] });
             DialogResult = true;

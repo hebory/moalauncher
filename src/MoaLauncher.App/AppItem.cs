@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
+using System.Windows.Media.Imaging;
 using MoaLauncher.Core;
 
 namespace MoaLauncher.App;
@@ -29,6 +30,11 @@ public sealed class AppItem(AppDefinition definition) : INotifyPropertyChanged
     public string Description => Definition.Description;
     public string Monogram => Definition.Monogram;
     public string AccentColor => Definition.AccentColor;
+    private BitmapSource? iconImage;
+    public BitmapSource? IconImage { get => iconImage; set { iconImage = value; Changed(); } }
+    private BitmapSource? coverImage;
+    public BitmapSource? CoverImage { get => coverImage; set { coverImage = value; Changed(); Changed(nameof(HasCover)); } }
+    public bool HasCover => CoverImage is not null;
     public string Category => Definition.Category;
     public string Repository => Definition.Repository;
     public bool NeedsConnection => string.IsNullOrWhiteSpace(Repository);

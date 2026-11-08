@@ -14,6 +14,8 @@ public sealed record AppDefinition
     public string Category { get; init; } = "유틸리티";
     public string AccentColor { get; init; } = "#7C9CFF";
     public string Monogram { get; init; } = "M";
+    public string? IconUrl { get; init; }
+    public string? CoverUrl { get; init; }
     // Empty until the publisher's repository is known; never guess a source.
     public string Repository { get; init; } = "";
     public List<PackageDefinition> Packages { get; init; } = [];

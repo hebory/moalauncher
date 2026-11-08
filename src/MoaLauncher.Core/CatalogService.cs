@@ -60,6 +60,8 @@ public static class CatalogService
             CheckText(app.Monogram, "앱 표시 문자", 4, required: true);
             if (app.AccentColor is null || !Regex.IsMatch(app.AccentColor, "^#[0-9a-fA-F]{6}$")) throw new InvalidDataException($"앱 색상 형식이 올바르지 않습니다: {app.Id}");
             if (app.Repository is null || (app.Repository.Length != 0 && !IsRepository(app.Repository))) throw new InvalidDataException($"GitHub 저장소 형식이 올바르지 않습니다: {app.Id}");
+            if (!IsOptionalImageUrl(app.IconUrl, app.Repository)) throw new InvalidDataException($"앱 아이콘 URL 형식이 올바르지 않습니다: {app.Id}");
+            if (!IsOptionalImageUrl(app.CoverUrl, app.Repository)) throw new InvalidDataException($"앱 커버 URL 형식이 올바르지 않습니다: {app.Id}");
             if (app.Packages is null || app.Packages.Count is 0 or > 12) throw new InvalidDataException($"앱 패키지 목록이 올바르지 않습니다: {app.Id}");
             var architectures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var package in app.Packages)
@@ -83,6 +85,37 @@ public static class CatalogService
 
     internal static bool IsRepository(string? repository) =>
         repository is not null && Regex.IsMatch(repository, "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9_.-]{1,100}$");
+
+    private static bool IsOptionalImageUrl(string? value, string? repository)
+    {
+        if (string.IsNullOrEmpty(value)) return true;
+        if (value.Length > 2048 || value.Any(char.IsControl) || !Uri.TryCreate(value, UriKind.Absolute, out var uri)) return false;
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(uri.IdnHost, "raw.githubusercontent.com", StringComparison.OrdinalIgnoreCase) ||
+            !uri.IsDefaultPort || uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0)
+            return false;
+
+        var repositoryParts = repository?.Split('/');
+        if (repositoryParts is not { Length: 2 }) return false;
+        try
+        {
+            var pathParts = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Select(Uri.UnescapeDataString).ToArray();
+            if (pathParts.Length < 4 ||
+                !string.Equals(pathParts[0], repositoryParts[0], StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(pathParts[1], repositoryParts[1], StringComparison.OrdinalIgnoreCase))
+                return false;
+            if (pathParts.Any(part => string.IsNullOrWhiteSpace(part) || part is "." or ".." ||
+                                      part.Contains('/') || part.Contains('\\') || part.Any(char.IsControl)))
+                return false;
+
+            var extension = Path.GetExtension(pathParts[^1]);
+            return extension.Equals(".png", StringComparison.OrdinalIgnoreCase) ||
+                   extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase) ||
+                   extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (UriFormatException) { return false; }
+    }
 
     private static void CheckText(string value, string label, int maxLength, bool required)
     {

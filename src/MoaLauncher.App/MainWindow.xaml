@@ -88,10 +88,24 @@
                   <StackPanel>
                     <Grid>
                       <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                      <Border Width="48" Height="48" CornerRadius="13" Background="{Binding AccentColor}" Margin="0,0,16,0" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding Monogram}" FontFamily="Segoe UI" FontSize="21" FontWeight="Bold"
-                                   Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                      </Border>
+                      <Grid Width="48" Height="48" Margin="0,0,16,0" VerticalAlignment="Center">
+                        <Border CornerRadius="13" Background="{Binding AccentColor}">
+                          <Border.Style>
+                            <Style TargetType="Border">
+                              <Setter Property="Visibility" Value="Collapsed"/>
+                              <Style.Triggers>
+                                <DataTrigger Binding="{Binding IconImage}" Value="{x:Null}">
+                                  <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                              </Style.Triggers>
+                            </Style>
+                          </Border.Style>
+                          <TextBlock Text="{Binding Monogram}" FontFamily="Segoe UI" FontSize="21" FontWeight="Bold"
+                                     Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <Image Source="{Binding IconImage}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"
+                               AutomationProperties.Name="{Binding Name, StringFormat='{}{0} 아이콘'}"/>
+                      </Grid>
                       <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,18,0">
                         <TextBlock Text="{Binding Name}" FontSize="17" FontWeight="Bold" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
                         <TextBlock Text="{Binding Description}" Foreground="{StaticResource MutedBrush}" FontSize="12"
