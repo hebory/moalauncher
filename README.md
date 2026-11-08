@@ -4,6 +4,8 @@
 
 ## 시작하기
 
+[최신 릴리스](https://github.com/hebory/moalauncher/releases/latest)에서 `MoaLauncher-<버전>-Setup-x64.exe`를 내려받아 실행하세요. 현재 사용자 계정에 설치되며 시작 메뉴의 **Moa Launcher**로 열 수 있습니다. 별도 .NET 설치는 필요하지 않습니다. 포터블 사용은 같은 릴리스의 ZIP을 별도 폴더에 풀어 실행하면 됩니다.
+
 소스에서 실행하려면 Windows와 .NET 8 SDK가 필요합니다.
 
 ```powershell
@@ -46,7 +48,7 @@ dotnet run --project tests/MoaLauncher.App.SmokeTests -c Release -- --background
 
 두 배포 형식은 각각 `.sha256` 파일이 생성되며 `SHA256SUMS.txt`에 두 파일의 SHA-256이 함께 기록됩니다. 내려받은 파일은 실행 전에 체크섬을 확인하세요. 포터블 ZIP은 .NET 8 런타임을 포함하므로 사용자의 PC에 .NET 설치가 필요하지 않습니다.
 
-GitHub Action은 Windows 빌드·테스트와 정상/백그라운드 실행 스모크 확인을 마친 뒤 `v*` 태그에서 ZIP, 설치기와 체크섬 파일을 GitHub Release에 첨부합니다. 자동 생성되는 릴리스 설명은 한국어입니다. 기존 릴리스에 동일한 파일명이 있으면 덮어쓰지 않고 실패합니다. 릴리스는 공개 저장소의 안정 버전만 사용하세요.
+GitHub Action은 Windows 빌드·테스트와 정상/백그라운드 실행 스모크 확인을 마친 뒤 `v*` 태그에서 ZIP, 설치기와 체크섬 파일을 GitHub Release에 첨부합니다. 자동 생성되는 릴리스 설명은 한국어입니다. 기존 릴리스에 동일한 파일명이 있으면 덮어쓰지 않고 실패합니다. 브랜치에서 **Publish Windows release**를 수동 실행하면 공개 릴리스를 변경하지 않고 패키지 생성만 검증하며 산출물을 Actions artifact로 보관합니다. 릴리스는 공개 저장소의 안정 버전만 사용하세요.
 
 ## 새 앱 등록하기
 

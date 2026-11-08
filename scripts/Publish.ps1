@@ -91,9 +91,11 @@ $hash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerI
 
 if (!$IsccPath) {
     $candidatePaths = @(
+      @(
         (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'),
         (Join-Path $env:ProgramFiles 'Inno Setup 6/ISCC.exe')
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+      ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+    )
     if ($candidatePaths.Count -gt 0) { $IsccPath = $candidatePaths[0] }
 }
 if (!$IsccPath -or !(Test-Path -LiteralPath $IsccPath -PathType Leaf)) {

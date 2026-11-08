@@ -37,27 +37,41 @@ jobs:
       - name: Check tag and app version
         shell: pwsh
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          if ($tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw "Release tag must use vMAJOR.MINOR.PATCH; found '$tag'." }
-          $tagVersion = $Matches[1]
           [xml]$project = Get-Content Directory.Build.props
           $version = [string]$project.Project.PropertyGroup.Version
           if (!$version) { throw 'Directory.Build.props에 Version이 없습니다.' }
-          if ($tagVersion -ne $version) { throw "Tag $tagVersion does not match project version $version. Update the project version before tagging." }
-          "MOA_RELEASE_VERSION=$tagVersion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          if ($env:GITHUB_REF -match '^refs/tags/') {
+            $tag = $env:GITHUB_REF_NAME
+            if ($tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw "Release tag must use vMAJOR.MINOR.PATCH; found '$tag'." }
+            $tagVersion = $Matches[1]
+            if ($tagVersion -ne $version) { throw "Tag $tagVersion does not match project version $version. Update the project version before tagging." }
+            $version = $tagVersion
+          }
+          "MOA_RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Find Inno Setup Compiler
         shell: pwsh
         run: |
           $candidates = @(
-            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'),
-            (Join-Path $env:ProgramFiles 'Inno Setup 6/ISCC.exe')
-          ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+            @(
+              (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'),
+              (Join-Path $env:ProgramFiles 'Inno Setup 6/ISCC.exe')
+            ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+          )
           if ($candidates.Count -eq 0) { throw 'Inno Setup 6 ISCC.exe was not found on this runner.' }
           "MOA_ISCC_PATH=$($candidates[0])" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Publish ZIP, installer, and checksums
         shell: pwsh
         run: ./scripts/Publish.ps1 -Version $env:MOA_RELEASE_VERSION -IsccPath $env:MOA_ISCC_PATH
+      - name: Store package verification artifacts
+        if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: moa-launcher-${{ env.MOA_RELEASE_VERSION }}-windows-x64-package-check
+          path: artifacts/distribution/*
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload GitHub Release assets
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
