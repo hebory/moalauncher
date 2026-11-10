@@ -40,7 +40,9 @@
 }
 ```
 
-기본 모아뷰 항목은 사용자가 확인한 `hebory/moaview` 저장소에 연결됩니다. 다른 프로그램을 등록할 때는 해당 프로그램의 실제 `계정명/저장소명`을 입력하세요. 빈 `repository`도 표시용 항목으로 읽을 수 있지만 릴리스를 조회하거나 설치할 수 없습니다.
+기본 항목은 모아뷰(`hebory/moaview`)와 MoaVCS(`hebory/moavcs`)입니다. MoaVCS는 저장소의 [공식 등록 파일](https://github.com/hebory/moavcs/blob/master/moalauncher.json)을 기준으로 연결하며, `moavcs-*-win-x64-setup.exe` Inno 설치 파일과 `%LOCALAPPDATA%\Programs\moavcs\moavcs.exe`를 사용합니다. 공식 이미지는 `master` 브랜치의 `icon.png`, `cover.png`입니다. 기존 런처에도 이 등록 파일을 가져와 추가할 수 있습니다.
+
+다른 프로그램을 등록할 때는 해당 프로그램의 실제 `계정명/저장소명`을 입력하세요. 빈 `repository`도 표시용 항목으로 읽을 수 있지만 릴리스를 조회하거나 설치할 수 없습니다.
 
 `iconUrl`과 `coverUrl`은 선택 항목이며 기존 카탈로그에서 생략해도 호환됩니다. 지정할 때는 해당 앱의 GitHub 저장소에 있는 `raw.githubusercontent.com` HTTPS 이미지 URL을 사용하고 PNG/JPG/JPEG 파일만 허용합니다. 아이콘은 목록과 상세 화면에, 커버는 상세 화면에만 표시합니다. 다운로드 실패 시 마지막 정상 이미지 캐시를 사용하고, 사용할 이미지가 없으면 문자 아이콘을 표시하며 커버 영역은 접습니다. 기존 사용자 항목에 이미지 필드가 없고 저장소가 기본 항목과 같으면 기본 이미지 URL을 이어받습니다. 명시적으로 표시하지 않으려면 빈 문자열을 지정하세요. 기본 모아뷰 URL은 `main` 브랜치의 `icon.png`, `cover.png`를 가리킵니다.
 

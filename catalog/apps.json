@@ -20,6 +20,26 @@
           "installDirectory": "Programs/MoaView"
         }
       ]
+    },
+    {
+      "id": "moavcs",
+      "name": "MoaVCS",
+      "description": "Git, SVN, Perforce, Lore 저장소를 하나의 화면과 탐색기 메뉴에서 관리합니다.",
+      "category": "개발 · 버전 관리",
+      "accentColor": "#D85130",
+      "monogram": "VC",
+      "repository": "hebory/moavcs",
+      "iconUrl": "https://raw.githubusercontent.com/hebory/moavcs/master/icon.png",
+      "coverUrl": "https://raw.githubusercontent.com/hebory/moavcs/master/cover.png",
+      "packages": [
+        {
+          "architecture": "x64",
+          "kind": "inno",
+          "assetPattern": "moavcs-*-win-x64-setup.exe",
+          "executablePath": "moavcs.exe",
+          "installDirectory": "Programs/moavcs"
+        }
+      ]
     }
   ]
 }
