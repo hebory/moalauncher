@@ -110,7 +110,12 @@
                         <TextBlock Text="{Binding Name}" FontSize="17" FontWeight="Bold" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
                         <TextBlock Text="{Binding Description}" Foreground="{StaticResource MutedBrush}" FontSize="12"
                                    Margin="0,6,0,0" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
-                        <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusColor}" FontSize="11" Margin="0,8,0,0"/>
+                        <WrapPanel Margin="0,8,0,0">
+                          <TextBlock Text="{Binding InstalledVersion, StringFormat='설치 버전 {0} ·'}"
+                                     Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,6,0"
+                                     Visibility="{Binding IsInstalled, Converter={StaticResource BoolVisibility}}"/>
+                          <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusColor}" FontSize="11"/>
+                        </WrapPanel>
                       </StackPanel>
                       <StackPanel Grid.Column="2" VerticalAlignment="Center">
                         <Button Content="{Binding ActionText}" IsEnabled="{Binding CanAct}" Click="AppAction_Click"
