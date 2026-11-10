@@ -120,7 +120,6 @@ public partial class MainWindow : Window
                 Path.Combine(AppContext.BaseDirectory, "MoaLauncher.exe"), AppContext.BaseDirectory, "launcher", DateTimeOffset.UtcNow)
         };
         items.Add(launcherItem);
-        LauncherUpdatePanel.DataContext = launcherItem;
         foreach (var definition in merged.Values)
         {
             var item = new AppItem(definition);
@@ -152,13 +151,12 @@ public partial class MainWindow : Window
         if (AppCards is null) return;
         var search = SearchBox.Text.Trim();
         visibleItems.Clear();
-        foreach (var item in items.Where(i => !i.IsLauncher && (filter != "installed" || i.IsInstalled) && (filter != "updates" || i.HasUpdate))
+        foreach (var item in items.Where(i => (filter != "installed" || i.IsInstalled) && (filter != "updates" || i.HasUpdate))
             .OrderByDescending(i => filter == "updates" && notifiedAppIds?.Contains(i.Definition.Id) == true))
             if ($"{item.Name} {item.Description} {item.Repository}".Contains(search, StringComparison.OrdinalIgnoreCase)) visibleItems.Add(item);
         LibrarySummary.Text = $"{visibleItems.Count}개 프로그램";
-        var updates = items.Count(i => !i.IsLauncher && i.HasUpdate);
+        var updates = items.Count(i => i.HasUpdate);
         UpdatesNav.Content = updates > 0 ? $"업데이트 {updates}" : "업데이트";
-        SettingsNav.Content = items.Any(i => i.IsLauncher && i.HasUpdate) ? "설정 · 새 버전" : "설정";
         EmptyText.Text = search.Length > 0 ? "검색 조건에 맞는 프로그램이 없습니다." : filter switch
         {
             "updates" => "현재 확인된 업데이트가 없습니다. ‘업데이트 확인’으로 최신 상태를 확인하세요.",
@@ -215,10 +213,8 @@ public partial class MainWindow : Window
                 finally { item.Busy = false; }
             }
             LastCheckedText.Text = $"마지막 확인 {DateTime.Now:HH:mm}";
-            var programs = items.Where(i => !i.IsLauncher).ToArray();
-            var errors = programs.Count(i => i.HasError);
-            StatusText.Text = errors > 0 ? $"{errors}개 앱의 확인 결과를 살펴보세요. 앱 카드에 원인을 표시했습니다." : programs.Length > 0 && programs.All(i => i.NeedsConnection) ? "저장소를 연결하면 최신 릴리스를 확인할 수 있습니다." : $"확인 완료 · 업데이트 가능한 프로그램 {programs.Count(i => i.HasUpdate)}개";
-            if (items.Any(i => i.IsLauncher && i.HasError)) StatusText.Text += " · 런처 확인 결과는 설정에서 확인하세요.";
+            var errors = items.Count(i => i.HasError);
+            StatusText.Text = errors > 0 ? $"{errors}개 앱의 확인 결과를 살펴보세요. 앱 카드에 원인을 표시했습니다." : items.Count > 0 && items.All(i => i.NeedsConnection) ? "저장소를 연결하면 최신 릴리스를 확인할 수 있습니다." : $"확인 완료 · 업데이트 가능한 프로그램 {items.Count(i => i.HasUpdate)}개";
             ApplyFilter();
             NotifyUpdates(items);
         }
@@ -303,17 +299,6 @@ public partial class MainWindow : Window
     internal void ShowUpdateNotification(IReadOnlyCollection<string> appIds)
     {
         notifiedAppIds = new HashSet<string>(appIds, StringComparer.OrdinalIgnoreCase);
-        var launcher = items.FirstOrDefault(i => i.IsLauncher && notifiedAppIds.Contains(i.Definition.Id));
-        var hasProgramTargets = items.Any(i => !i.IsLauncher && i.HasUpdate && notifiedAppIds.Contains(i.Definition.Id));
-        // Tray notices retain earlier IDs; choose the destination from current app state.
-        if (launcher is not null && !hasProgramTargets)
-        {
-            ShowSettings();
-            StatusText.Text = launcher.HasUpdate
-                ? "런처의 ‘업데이트 후 재시작’ 버튼을 눌러 새 버전을 설치할 수 있습니다."
-                : "런처의 현재 버전과 업데이트 상태를 확인하세요.";
-            return;
-        }
         ShowLibrary();
         filter = "updates";
         PageTitle.Text = "업데이트";
@@ -323,11 +308,10 @@ public partial class MainWindow : Window
         var targets = visibleItems.Where(i => notifiedAppIds.Contains(i.Definition.Id)).ToArray();
         StatusText.Text = targets.Length switch
         {
-            1 => $"{targets[0].Name}의 ‘업데이트’ 버튼을 눌러 설치할 수 있습니다.",
-            > 1 => $"알림을 받은 {targets.Length}개 프로그램을 목록 위쪽에 표시했습니다. ‘업데이트’ 버튼을 눌러 설치하세요.",
+            1 => $"{targets[0].Name}의 ‘{targets[0].ActionText}’ 버튼을 눌러 설치할 수 있습니다.",
+            > 1 => $"알림을 받은 {targets.Length}개 프로그램을 목록 위쪽에 표시했습니다. 각 프로그램의 업데이트 버튼을 눌러 설치하세요.",
             _ => "알림 이후 프로그램 상태가 바뀌었습니다. 현재 업데이트 목록을 확인하세요."
         };
-        if (launcher?.HasUpdate == true) StatusText.Text += " 런처는 설정에서 업데이트할 수 있습니다.";
     }
     private void Settings_Click(object sender, RoutedEventArgs e) => ShowSettings();
     private void ShowSettings()
@@ -337,28 +321,6 @@ public partial class MainWindow : Window
         SettingsView.Visibility = Visibility.Visible;
         SelectNavigation(SettingsNav);
         SettingsView.ScrollToTop();
-    }
-    private async void LauncherCheck_Click(object sender, RoutedEventArgs e)
-    {
-        if (checking || operations.Count > 0 || LauncherUpdatePanel.DataContext is not AppItem item) return;
-        checking = true;
-        RefreshButton.IsEnabled = false;
-        item.Busy = true;
-        try
-        {
-            await CheckOneAsync(item, lifetime.Token);
-            StatusText.Text = item.HasError ? "런처 업데이트 확인 결과를 살펴보세요." : item.HasUpdate
-                ? "새 런처 버전이 있습니다. ‘업데이트 후 재시작’을 선택하세요." : "최신 런처 버전을 사용 중입니다.";
-        }
-        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
-        finally
-        {
-            item.Busy = false;
-            checking = false;
-            RefreshButton.IsEnabled = operations.Count == 0;
-            ApplyFilter();
-        }
-        NotifyUpdates([item]);
     }
     private void ShowLibrary() { LibraryView.Visibility = Visibility.Visible; SettingsView.Visibility = Visibility.Collapsed; SelectNavigation(LibraryNav); }
     private void SelectNavigation(Button selected)
