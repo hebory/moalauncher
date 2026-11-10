@@ -43,6 +43,7 @@ public sealed class AppItem(AppDefinition definition) : INotifyPropertyChanged
     public bool IsInstalled => Installed is not null;
     public string VersionText => Installed is null ? "아직 설치되지 않음" : $"설치됨 · {Installed.Version}";
     public string InstalledVersion => Installed?.Version ?? "미설치";
+    public string InstalledVersionLabel => Installed is null ? "" : $"v{Installed.Version.TrimStart('v', 'V').Split('+')[0]}";
     public string LatestVersion => Release?.Tag ?? (HasError ? "확인 필요" : "확인 전");
     public string LatestText => Release is null ? "릴리스 확인 전" : $"최신 {Release.Tag}";
     public string StatusText => Busy ? ProgressText : HasUpdate ? "업데이트 가능" : IsInstalled ? "사용 준비 완료" : NeedsConnection ? "저장소 연결 필요" : Release is not null ? "설치 가능" : "릴리스 확인 필요";

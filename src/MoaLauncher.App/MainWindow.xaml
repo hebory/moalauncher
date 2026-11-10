@@ -107,15 +107,20 @@
                                AutomationProperties.Name="{Binding Name, StringFormat='{}{0} 아이콘'}"/>
                       </Grid>
                       <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,18,0">
-                        <TextBlock Text="{Binding Name}" FontSize="17" FontWeight="Bold" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+                        <Grid HorizontalAlignment="Left">
+                          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                          <TextBlock Text="{Binding Name}" FontSize="17" FontWeight="Bold" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+                          <Border Grid.Column="1" Background="{StaticResource SoftAccentBrush}" CornerRadius="5" Padding="7,2" Margin="8,2,0,0" MaxWidth="140"
+                                  VerticalAlignment="Center" ToolTip="{Binding InstalledVersion, StringFormat='설치 버전 {0}'}"
+                                  Visibility="{Binding IsInstalled, Converter={StaticResource BoolVisibility}}">
+                            <TextBlock Text="{Binding InstalledVersionLabel}" FontSize="11" FontWeight="Medium" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                       Foreground="{StaticResource AccentBrush}"
+                                       AutomationProperties.Name="{Binding InstalledVersion, StringFormat='설치 버전 {0}'}"/>
+                          </Border>
+                        </Grid>
                         <TextBlock Text="{Binding Description}" Foreground="{StaticResource MutedBrush}" FontSize="12"
                                    Margin="0,6,0,0" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
-                        <WrapPanel Margin="0,8,0,0">
-                          <TextBlock Text="{Binding InstalledVersion, StringFormat='설치 버전 {0} ·'}"
-                                     Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,6,0"
-                                     Visibility="{Binding IsInstalled, Converter={StaticResource BoolVisibility}}"/>
-                          <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusColor}" FontSize="11"/>
-                        </WrapPanel>
+                        <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusColor}" FontSize="11" Margin="0,8,0,0"/>
                       </StackPanel>
                       <StackPanel Grid.Column="2" VerticalAlignment="Center">
                         <Button Content="{Binding ActionText}" IsEnabled="{Binding CanAct}" Click="AppAction_Click"
