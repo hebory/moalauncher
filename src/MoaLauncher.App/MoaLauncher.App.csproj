@@ -16,5 +16,6 @@
     <InternalsVisibleTo Include="MoaLauncher.App.SmokeTests" />
     <ProjectReference Include="../MoaLauncher.Core/MoaLauncher.Core.csproj" />
     <Content Include="../../catalog/apps.json" Link="catalog/apps.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../../LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
