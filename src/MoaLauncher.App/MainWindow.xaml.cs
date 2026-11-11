@@ -185,7 +185,7 @@ public partial class MainWindow : Window
         RefreshButton.IsEnabled = idle;
         var count = items.Count(i => i.HasUpdate && !i.NeedsConnection);
         UpdateAllButton.Content = batchUpdating ? "업데이트 중…" : count > 0 ? $"모두 업데이트 ({count})" : "모두 업데이트";
-        UpdateAllButton.IsEnabled = ready && idle && count > 0;
+        UpdateAllButton.IsEnabled = CanUpdateAll;
         StopUpdatesButton.Visibility = batchUpdating ? Visibility.Visible : Visibility.Collapsed;
         StopUpdatesButton.IsEnabled = batchUpdating && !batchCancelRequested &&
             !items.Any(i => i.IsLauncher && i.Busy && !i.CanCancel);
@@ -317,9 +317,14 @@ public partial class MainWindow : Window
 
     private async void UpdateAll_Click(object sender, RoutedEventArgs e) => await UpdateAllAsync();
 
-    private async Task UpdateAllAsync()
+    internal bool CanUpdateAll => ready && !batchUpdating && !catalogChanging && !checking &&
+        operations.Count == 0 && !items.Any(i => i.Busy) &&
+        items.Any(i => i.HasUpdate && !i.NeedsConnection) &&
+        !OwnedWindows.OfType<AppEditorWindow>().Any(window => window.IsVisible);
+
+    internal async Task UpdateAllAsync()
     {
-        if (batchUpdating || catalogChanging || checking || operations.Count > 0 || items.Any(i => i.Busy)) return;
+        if (!CanUpdateAll) return;
         // Snapshot all known updates, independent of the current search or filter.
         var pending = items.Where(i => i.HasUpdate && !i.NeedsConnection).OrderBy(i => i.IsLauncher).ToArray();
         if (pending.Length == 0) return;

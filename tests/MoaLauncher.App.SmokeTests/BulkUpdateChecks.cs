@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
@@ -14,17 +15,17 @@ namespace MoaLauncher.App.SmokeTests;
 
 internal sealed partial class UpdateNotificationChecks
 {
-    private async Task RunBulkUpdateChecksAsync(MainWindow window, List<AppItem> items, AppItem launcherItem)
+    private async Task RunBulkUpdateChecksAsync(App app, MainWindow window, List<AppItem> items, AppItem launcherItem)
     {
-        await CheckSuccessfulBulkUpdateAsync(window, items, launcherItem);
+        await CheckSuccessfulBulkUpdateAsync(app, window, items, launcherItem);
         await CheckBulkFailureStopsRemainderAsync(window, items, launcherItem);
         await CheckBulkCancellationStopsRemainderAsync(window, items, launcherItem);
         await CheckBatchStopWaitsForInstallerAsync(window, items, launcherItem);
-        await CheckNoUpdatesDisablesBulkButtonsAsync(window, items, launcherItem);
+        await CheckNoUpdatesDisablesBulkButtonsAsync(app, window, items, launcherItem);
         await CheckMinimumWidthHeaderLayoutAsync(window);
     }
 
-    private async Task CheckSuccessfulBulkUpdateAsync(MainWindow window, List<AppItem> items, AppItem launcherItem)
+    private async Task CheckSuccessfulBulkUpdateAsync(App app, MainWindow window, List<AppItem> items, AppItem launcherItem)
     {
         var launcherVersionBeforeBatch = launcherItem.Installed?.Version
             ?? throw new InvalidOperationException("The launcher had no installed version before the batch fixture.");
@@ -53,15 +54,49 @@ internal sealed partial class UpdateNotificationChecks
         Require(!stop.IsEnabled && stop.Visibility == Visibility.Collapsed,
             "The stop button was available before a bulk update started.");
 
-        var batchTask = InvokeBatch(window);
+        var tray = GetField<object>(app, "trayIcon");
+        var menu = GetField<System.Windows.Forms.ContextMenuStrip>(tray, "contextMenu");
+        var trayUpdateAll = FindTrayUpdateAllItem(menu);
+        RefreshTrayMenu(menu);
+        Require(trayUpdateAll.Enabled, "The tray update-all action was disabled despite pending updates.");
+
+        var editor = new AppEditorWindow(targetItem.Definition) { Owner = window };
+        editor.Show();
+        try
+        {
+            GetField<TextBox>(editor, "NameInput").Text = "저장하지 않은 프로그램 이름";
+            trayUpdateAll.PerformClick();
+            Require(editor.IsVisible && GetField<TextBox>(editor, "NameInput").Text == "저장하지 않은 프로그램 이름" &&
+                    !GetField<bool>(window, "batchUpdating") && installCalls.Count == 0,
+                "A stale tray action interrupted an open program editor or started an update.");
+            RefreshTrayMenu(menu);
+            Require(!trayUpdateAll.Enabled, "The tray update-all action was enabled while a program editor was open.");
+        }
+        finally { editor.Close(); }
+        RefreshTrayMenu(menu);
+        Require(trayUpdateAll.Enabled, "The tray update-all action stayed disabled after closing the editor.");
+
+        GetMethod(window, "Settings_Click").Invoke(window, [window, new RoutedEventArgs()]);
+        app.HideMainWindow();
+        trayUpdateAll.PerformClick();
         await WaitUntilAsync(() => GetField<bool>(window, "batchUpdating") && installCalls.Count == 1,
-            window.Dispatcher, "bulk update beginning its first installation");
+            window.Dispatcher, "tray update-all beginning its first installation");
+        Require(window.IsVisible && GetField<TextBlock>(window, "PageTitle").Text == "업데이트" &&
+                GetField<TextBox>(window, "SearchBox").Text.Length == 0 &&
+                GetField<FrameworkElement>(window, "LibraryView").Visibility == Visibility.Visible &&
+                GetField<FrameworkElement>(window, "SettingsView").Visibility == Visibility.Collapsed,
+            "The tray update-all action did not restore the library, clear search, and show the update list.");
         Require(!updateAll.IsEnabled && stop.IsEnabled && stop.Visibility == Visibility.Visible,
             "Bulk update controls did not switch to the running state.");
         await CheckMinimumWidthHeaderLayoutAsync(window);
 
         var callsBeforeReentry = releaseCallOrder.Count;
         await InvokeBatch(window);
+        // A stale enabled menu item must still be harmless: the click path rechecks the current state.
+        trayUpdateAll.PerformClick();
+        RefreshTrayMenu(menu);
+        Require(!trayUpdateAll.Enabled, "The tray update-all action remained enabled while a batch was running.");
+        trayUpdateAll.PerformClick();
         await (GetMethod(window, "CheckAllAsync").Invoke(window, null) as Task
             ?? throw new InvalidOperationException("CheckAllAsync did not return a Task."));
         GetMethod(window, "AppAction_Click").Invoke(window,
@@ -76,7 +111,8 @@ internal sealed partial class UpdateNotificationChecks
             "A reentrant update, app action, edit, or catalog import started during the bulk operation.");
 
         (installGate ?? throw new InvalidOperationException("The fake installation gate was not initialized.")).TrySetResult();
-        await batchTask;
+        await WaitUntilAsync(() => !GetField<bool>(window, "batchUpdating"),
+            window.Dispatcher, "tray bulk update completion");
         Require(releaseCallOrder.SequenceEqual([
                 targetItem.Definition.Id, secondItem.Definition.Id, thirdItem.Definition.Id, launcherItem.Definition.Id
             ], StringComparer.OrdinalIgnoreCase),
@@ -140,7 +176,7 @@ internal sealed partial class UpdateNotificationChecks
         AssertBatchStoppedButtons(window, pendingUpdatesRemain: true);
     }
 
-    private async Task CheckNoUpdatesDisablesBulkButtonsAsync(MainWindow window, List<AppItem> items, AppItem launcherItem)
+    private async Task CheckNoUpdatesDisablesBulkButtonsAsync(App app, MainWindow window, List<AppItem> items, AppItem launcherItem)
     {
         var apps = SetupBulkFixture(window, items, launcherItem, launcherHasUpdate: false, regularAppsHaveUpdates: false);
         InvokeNoArg(window, "RefreshActionAvailability");
@@ -148,11 +184,30 @@ internal sealed partial class UpdateNotificationChecks
         var stop = GetField<Button>(window, "StopUpdatesButton");
         Require(!updateAll.IsEnabled && !stop.IsEnabled && stop.Visibility == Visibility.Collapsed,
             "Bulk update controls were enabled when every app was already current.");
+        var tray = GetField<object>(app, "trayIcon");
+        var menu = GetField<System.Windows.Forms.ContextMenuStrip>(tray, "contextMenu");
+        var trayUpdateAll = FindTrayUpdateAllItem(menu);
+        RefreshTrayMenu(menu);
+        Require(!trayUpdateAll.Enabled, "The tray update-all action was enabled when every app was already current.");
         var callsBefore = releaseCallOrder.Count;
+        trayUpdateAll.PerformClick();
         await InvokeBatch(window);
         Require(releaseCallOrder.Count == callsBefore && installCalls.Count == 0 && !GetField<bool>(window, "batchUpdating"),
             "Running a no-op bulk update contacted a release source or changed batch state.");
         Require(apps.All(item => !item.HasUpdate), "The latest-version fixture still contained an update.");
+    }
+
+    private static System.Windows.Forms.ToolStripMenuItem FindTrayUpdateAllItem(System.Windows.Forms.ContextMenuStrip menu) =>
+        menu.Items.OfType<System.Windows.Forms.ToolStripMenuItem>()
+            .SingleOrDefault(item => item.Text == "모두 업데이트")
+        ?? throw new InvalidOperationException("The tray menu did not contain a '모두 업데이트' action.");
+
+    private static void RefreshTrayMenu(System.Windows.Forms.ContextMenuStrip menu)
+    {
+        var onOpening = typeof(System.Windows.Forms.ContextMenuStrip).GetMethod("OnOpening",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ContextMenuStrip.OnOpening was not found.");
+        onOpening.Invoke(menu, [new CancelEventArgs()]);
     }
 
     private async Task CheckBatchStopWaitsForInstallerAsync(MainWindow window, List<AppItem> items, AppItem launcherItem)

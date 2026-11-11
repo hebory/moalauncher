@@ -222,7 +222,7 @@ internal sealed partial class UpdateNotificationChecks
 
         await CheckLauncherSelfUpdateAsync(app, window, items, visible, launcherItem, launcherVersion, notifyIcon);
 
-        await RunBulkUpdateChecksAsync(window, items, launcherItem);
+        await RunBulkUpdateChecksAsync(app, window, items, launcherItem);
 
         Console.WriteLine("PASS: notification settings, app updates, built-in launcher notice navigation, and sequential bulk updates.");
     }

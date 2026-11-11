@@ -117,9 +117,15 @@ internal static class Program
         var tray = GetField<object>(app, "trayIcon");
         var notifyIcon = GetField<NotifyIcon>(tray, "notifyIcon");
         var menu = GetField<ContextMenuStrip>(tray, "contextMenu");
+        var openMenuItem = menu.Items.OfType<ToolStripMenuItem>()
+            .SingleOrDefault(item => item.Text == "모아 런처 열기");
+        var updateAllMenuItem = menu.Items.OfType<ToolStripMenuItem>()
+            .SingleOrDefault(item => item.Text == "모두 업데이트");
+        var exitMenuItem = menu.Items.OfType<ToolStripMenuItem>()
+            .SingleOrDefault(item => item.Text == "종료");
         if (!notifyIcon.Visible) throw new InvalidOperationException("Tray icon is not visible.");
-        if (menu.Items.Count < 3 || menu.Items[0].Text != "모아 런처 열기" || menu.Items[2].Text != "종료")
-            throw new InvalidOperationException("Tray menu is missing its open or exit action.");
+        if (openMenuItem is null || updateAllMenuItem is null || exitMenuItem is null)
+            throw new InvalidOperationException("Tray menu is missing its open, update-all, or exit action.");
 
         if (startsInBackground)
         {
@@ -169,7 +175,7 @@ internal static class Program
         await CheckDuplicateActivationAsync(app, window, testDataRoot, dataDirectory);
 
         app.HideMainWindow();
-        menu.Items[0].PerformClick();
+        openMenuItem.PerformClick();
         if (!window.IsVisible) throw new InvalidOperationException("Tray open menu action did not restore the window.");
 
         await updateChecks.RunAsync(app, window);
@@ -191,7 +197,7 @@ internal static class Program
         }
 
         app.HideMainWindow();
-        menu.Items[2].PerformClick();
+        exitMenuItem.PerformClick();
         if (!app.IsExiting) throw new InvalidOperationException("Tray exit menu action did not request application exit.");
     }
 

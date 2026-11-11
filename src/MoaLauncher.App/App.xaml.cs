@@ -66,7 +66,8 @@ public partial class App : Application
         try
         {
             MainWindow = MainWindowFactory();
-            trayIcon = new TrayIconService(RestoreMainWindow, RequestExit, OpenUpdateNotification);
+            trayIcon = new TrayIconService(RestoreMainWindow, RequestExit, OpenUpdateNotification, UpdateAllFromTray,
+                () => !IsExiting && !Dispatcher.HasShutdownStarted && MainWindow is MainWindow window && window.CanUpdateAll);
             activationRegistration = ThreadPool.RegisterWaitForSingleObject(activationEvent, (_, _) =>
             {
                 if (!Dispatcher.HasShutdownStarted)
@@ -123,6 +124,14 @@ public partial class App : Application
         // A modal editor/detail window should stay above its owner when reopening from the tray.
         var active = MainWindow.OwnedWindows.Cast<Window>().LastOrDefault(window => window.IsVisible) ?? MainWindow;
         active.Activate();
+    }
+
+    private async void UpdateAllFromTray()
+    {
+        if (IsExiting || Dispatcher.HasShutdownStarted || MainWindow is not MainWindow window || !window.CanUpdateAll) return;
+        foreach (var details in window.OwnedWindows.OfType<AppDetailsWindow>().ToArray()) details.Close();
+        RestoreMainWindow();
+        await window.UpdateAllAsync();
     }
 
     internal void RequestExit()

@@ -1,10 +1,11 @@
+using System.ComponentModel;
 using System.Drawing;
 using System.Reflection;
 using System.Windows.Forms;
 
 namespace MoaLauncher.App;
 
-/// <summary>Owns the notification-area icon and its window and exit actions.</summary>
+/// <summary>Owns the notification-area icon and its window, update, and exit actions.</summary>
 internal sealed class TrayIconService : IDisposable
 {
     private const string IconResourceName = "MoaLauncher.TrayIcon.ico";
@@ -12,6 +13,8 @@ internal sealed class TrayIconService : IDisposable
     private readonly Action exitApplication;
     private readonly NotifyIcon notifyIcon;
     private readonly ContextMenuStrip contextMenu;
+    private readonly ToolStripItem updateAllItem;
+    private readonly Func<bool> canUpdateAll;
     private readonly Icon icon;
     private readonly Action<IReadOnlyCollection<string>> openUpdates;
     private readonly HashSet<UpdateKey> announcedUpdates = new(UpdateKeyComparer.Instance);
@@ -21,16 +24,27 @@ internal sealed class TrayIconService : IDisposable
     private bool disposed;
     private bool hasAnnouncedUpdates;
 
-    public TrayIconService(Action openWindow, Action exitApplication, Action<IReadOnlyCollection<string>> openUpdates)
+    public TrayIconService(Action openWindow, Action exitApplication, Action<IReadOnlyCollection<string>> openUpdates,
+        Action updateAll, Func<bool> canUpdateAll)
     {
         this.openWindow = openWindow ?? throw new ArgumentNullException(nameof(openWindow));
         this.exitApplication = exitApplication ?? throw new ArgumentNullException(nameof(exitApplication));
         this.openUpdates = openUpdates ?? throw new ArgumentNullException(nameof(openUpdates));
+        ArgumentNullException.ThrowIfNull(updateAll);
+        this.canUpdateAll = canUpdateAll ?? throw new ArgumentNullException(nameof(canUpdateAll));
         icon = LoadIcon();
 
         contextMenu = new ContextMenuStrip();
         var openItem = contextMenu.Items.Add("모아 런처 열기");
         openItem.Click += (_, _) => this.openWindow();
+        updateAllItem = contextMenu.Items.Add("모두 업데이트");
+        updateAllItem.Enabled = false;
+        updateAllItem.Click += (_, _) =>
+        {
+            // State may change while the menu is open (for example, a periodic check can start).
+            if (!disposed && this.canUpdateAll()) updateAll();
+        };
+        contextMenu.Opening += OnMenuOpening;
         contextMenu.Items.Add(new ToolStripSeparator());
         var exitItem = contextMenu.Items.Add("종료");
         exitItem.Click += (_, _) => this.exitApplication();
@@ -98,6 +112,9 @@ internal sealed class TrayIconService : IDisposable
             openWindow();
     }
 
+    private void OnMenuOpening(object? sender, CancelEventArgs e) =>
+        updateAllItem.Enabled = !disposed && canUpdateAll();
+
     private void OnBalloonTipClicked(object? sender, EventArgs e)
     {
         if (disposed) return;
@@ -159,6 +176,7 @@ internal sealed class TrayIconService : IDisposable
         notifyIcon.MouseClick -= OnMouseClick;
         notifyIcon.BalloonTipClicked -= OnBalloonTipClicked;
         notifyIcon.Dispose();
+        contextMenu.Opening -= OnMenuOpening;
         contextMenu.Dispose();
         icon.Dispose();
     }
