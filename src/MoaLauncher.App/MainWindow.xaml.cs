@@ -120,6 +120,8 @@ public partial class MainWindow : Window
         var launcherItem = new AppItem(SelfUpdateService.Definition)
         {
             IsLauncher = true,
+            IconImage = LauncherArtwork.LoadIcon(),
+            CoverImage = LauncherArtwork.LoadCover(),
             Installed = new InstalledApp(SelfUpdateService.Definition.Id, LauncherVersion,
                 Path.Combine(AppContext.BaseDirectory, "MoaLauncher.exe"), AppContext.BaseDirectory, "launcher", DateTimeOffset.UtcNow)
         };
@@ -140,6 +142,7 @@ public partial class MainWindow : Window
         // Artwork is optional and does not delay the catalog, release checks, or app actions.
         foreach (var item in apps)
         {
+            if (item.IsLauncher) continue;
             try
             {
                 item.IconImage = await artwork.LoadAsync(item.Definition.IconUrl, cancellationToken);

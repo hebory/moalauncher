@@ -73,6 +73,12 @@ internal sealed partial class UpdateNotificationChecks
         Require(launcherItem.Installed is not null, "The built-in launcher did not detect its current installation.");
         Require(!GetProperty<bool>(launcherItem, "CanEdit") && !GetProperty<bool>(launcherItem, "CanLaunch"),
             "The built-in launcher still exposes app editing or launch actions.");
+        Require(launcherItem.Definition.IconUrl == "https://raw.githubusercontent.com/hebory/moalauncher/master/icon.png" &&
+                launcherItem.Definition.CoverUrl == "https://raw.githubusercontent.com/hebory/moalauncher/master/cover.png",
+            "The built-in launcher artwork URLs do not point to the public master-branch PNG assets.");
+        Require(launcherItem.IconImage is { IsFrozen: true, PixelWidth: 512, PixelHeight: 512 } &&
+                launcherItem.CoverImage is { IsFrozen: true, PixelWidth: 1672, PixelHeight: 941 },
+            "The built-in launcher did not load its frozen packaged icon and cover at startup.");
         var launcherVersion = launcherItem.Installed!.Version;
         releaseResults[launcherItem.Definition.Id] = new ReleaseResult(
             MakeLauncherRelease(launcherItem.Definition, ToReleaseTag(launcherVersion)), IsCached: false);

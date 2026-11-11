@@ -1,5 +1,7 @@
 # Moa Launcher
 
+![Moa Launcher](cover.png)
+
 **모아 프로그램을 한곳에 모아 설치하고, 최신 버전을 확인하는 Windows 런처입니다.** GitHub Releases에서 배포자의 설치 파일을 내려받아 확인한 뒤 프로그램을 설치하고 실행합니다. 새 앱은 카탈로그에 추가하거나 앱 화면에서 등록할 수 있습니다.
 
 ## 시작하기
@@ -15,6 +17,8 @@ dotnet run --project src/MoaLauncher.App
 기본 카탈로그에는 [모아뷰](https://github.com/hebory/moaview)와 [MoaVCS](https://github.com/hebory/moavcs)가 포함됩니다. 각 저장소의 공개 GitHub Releases에서 최신 안정 버전을 확인하고, `%LOCALAPPDATA%\Programs\MoaView`와 `%LOCALAPPDATA%\Programs\moavcs`의 기존 설치를 인식합니다. 다른 프로그램은 **프로그램 추가**로 등록하거나 설정 화면에서 카탈로그 JSON을 가져오세요.
 
 각 프로그램의 공식 `icon.png`는 프로그램 목록과 상세 화면에, `cover.png`는 **상세 보기**에 표시합니다. 이미지 주소는 카탈로그의 선택 항목 `iconUrl`·`coverUrl`로 연결합니다. 이미지 다운로드가 실패하면 마지막 정상 캐시를 사용하고, 캐시도 없으면 기존 문자 아이콘을 표시하며 커버 영역은 접습니다.
+
+모아 런처 자체의 아이콘과 커버는 앱에 포함되어 첫 실행이나 오프라인에서도 표시됩니다. 실행 파일·설치 프로그램·트레이 아이콘에도 같은 심볼을 사용합니다. 원본과 공개 이미지 주소, 제작 방법은 [런처 이미지 안내](docs/artwork.md)에 정리했습니다.
 
 기존 런처에서 MoaVCS를 바로 추가하려면 [공식 등록 파일](https://raw.githubusercontent.com/hebory/moavcs/master/moalauncher.json)을 저장한 뒤 **설정 → 카탈로그 가져오기**로 불러오세요. MoaVCS는 Git·SVN·Perforce·Lore 저장소를 관리하는 앱이며, 각 VCS 명령줄 도구는 별도로 설치해야 합니다.
 

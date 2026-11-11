@@ -7,6 +7,8 @@ public sealed class SelfUpdateService
 {
     public const string Repository = "hebory/moalauncher";
     public const string InstallerPattern = "MoaLauncher-*-Setup-x64.exe";
+    public const string IconUrl = "https://raw.githubusercontent.com/hebory/moalauncher/master/icon.png";
+    public const string CoverUrl = "https://raw.githubusercontent.com/hebory/moalauncher/master/cover.png";
 
     public static AppDefinition Definition { get; } = new()
     {
@@ -17,6 +19,8 @@ public sealed class SelfUpdateService
         AccentColor = "#8BA3FF",
         Monogram = "M",
         Repository = Repository,
+        IconUrl = IconUrl,
+        CoverUrl = CoverUrl,
         Packages =
         [
             new PackageDefinition

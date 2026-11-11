@@ -15,6 +15,8 @@ public sealed class SelfUpdateTests
         var definition = SelfUpdateService.Definition;
         Assert.Equal("moa-launcher", definition.Id);
         Assert.Equal(Repository, definition.Repository);
+        Assert.Equal("https://raw.githubusercontent.com/hebory/moalauncher/master/icon.png", Assert.IsType<string>(definition.IconUrl));
+        Assert.Equal("https://raw.githubusercontent.com/hebory/moalauncher/master/cover.png", Assert.IsType<string>(definition.CoverUrl));
         Assert.Equal("x64", Assert.Single(definition.Packages).Architecture);
         Assert.Equal("inno", definition.Packages[0].Kind);
         Assert.Equal("MoaLauncher.exe", definition.Packages[0].ExecutablePath);

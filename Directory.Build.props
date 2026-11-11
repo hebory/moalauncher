@@ -4,7 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>12</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Version>0.2.3</Version>
+    <Version>0.2.4</Version>
     <Company>Moa</Company>
     <Deterministic>true</Deterministic>
     <UseSharedCompilation>false</UseSharedCompilation>

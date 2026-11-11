@@ -4,7 +4,7 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
-    <ApplicationIcon>Assets/moa.ico</ApplicationIcon>
+    <ApplicationIcon>Assets/launcher.ico</ApplicationIcon>
     <AssemblyName>MoaLauncher</AssemblyName>
     <Product>Moa Launcher</Product>
     <Description>모아 프로그램 설치 및 업데이트 런처</Description>
@@ -12,7 +12,9 @@
   <ItemGroup>
     <Using Remove="System.Windows.Forms" />
     <Using Remove="System.Drawing" />
-    <EmbeddedResource Include="Assets/moa.ico" LogicalName="MoaLauncher.TrayIcon.ico" />
+    <EmbeddedResource Include="Assets/launcher.ico" LogicalName="MoaLauncher.TrayIcon.ico" />
+    <Resource Include="../../icon.png" Link="Assets/launcher-icon.png" />
+    <Resource Include="../../cover.png" Link="Assets/launcher-cover.png" />
     <InternalsVisibleTo Include="MoaLauncher.App.SmokeTests" />
     <ProjectReference Include="../MoaLauncher.Core/MoaLauncher.Core.csproj" />
     <Content Include="../../catalog/apps.json" Link="catalog/apps.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
