@@ -32,6 +32,10 @@ public partial class MainWindow : Window
     private bool initializationStarted;
     private bool readingStartupSetting;
     private bool checking;
+    private bool catalogChanging;
+    private bool batchUpdating;
+    private bool batchCancelRequested;
+    private enum UpdateOutcome { Completed, Failed, Cancelled, Restarting }
     private readonly SemaphoreSlim settingsGate = new(1, 1);
     private readonly CancellationTokenSource lifetime = new();
     private string filter = "all";
@@ -64,7 +68,7 @@ public partial class MainWindow : Window
             foreach (var operation in operations.Values) operation.Cancel();
             http.Dispose();
         };
-        timer.Tick += async (_, _) => { if (settings.PeriodicChecks && !checking && operations.Count == 0) await CheckAllAsync(); };
+        timer.Tick += async (_, _) => { if (settings.PeriodicChecks && !batchUpdating && !checking && operations.Count == 0) await CheckAllAsync(); };
     }
 
     internal async Task EnsureInitializedAsync()
@@ -91,7 +95,7 @@ public partial class MainWindow : Window
             ReadSelfUpdateResult();
         }
         catch (Exception ex) { ShowError(ex); }
-        finally { initializationStarted = false; }
+        finally { initializationStarted = false; RefreshActionAvailability(); }
     }
 
     private async Task LoadCatalogAsync()
@@ -169,6 +173,26 @@ public partial class MainWindow : Window
             button.Background = active ? (Brush)FindResource("SoftAccentBrush") : Brushes.Transparent;
             button.Foreground = (Brush)FindResource(active ? "AccentBrush" : "MutedBrush");
         }
+        RefreshActionAvailability();
+    }
+
+    private void RefreshActionAvailability()
+    {
+        var idle = !batchUpdating && !catalogChanging && !checking && operations.Count == 0 && !items.Any(i => i.Busy);
+        RefreshButton.IsEnabled = idle;
+        var count = items.Count(i => i.HasUpdate && !i.NeedsConnection);
+        UpdateAllButton.Content = batchUpdating ? "업데이트 중…" : count > 0 ? $"모두 업데이트 ({count})" : "모두 업데이트";
+        UpdateAllButton.IsEnabled = ready && idle && count > 0;
+        StopUpdatesButton.Visibility = batchUpdating ? Visibility.Visible : Visibility.Collapsed;
+        StopUpdatesButton.IsEnabled = batchUpdating && !batchCancelRequested &&
+            !items.Any(i => i.IsLauncher && i.Busy && !i.CanCancel);
+        foreach (var item in items)
+        {
+            var blocked = batchUpdating || catalogChanging;
+            if (item.ActionsBlocked == blocked) continue;
+            item.ActionsBlocked = blocked;
+            item.Refresh();
+        }
     }
 
     private async Task CheckOneAsync(AppItem item, CancellationToken ct = default)
@@ -198,9 +222,9 @@ public partial class MainWindow : Window
 
     private async Task CheckAllAsync()
     {
-        if (checking || operations.Count > 0) return;
+        if (batchUpdating || catalogChanging || checking || operations.Count > 0 || items.Any(i => i.Busy)) return;
         checking = true;
-        RefreshButton.IsEnabled = false;
+        RefreshActionAvailability();
         StatusText.Text = "프로그램의 새 버전을 확인하고 있습니다…";
         try
         {
@@ -219,12 +243,12 @@ public partial class MainWindow : Window
             NotifyUpdates(items);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
-        finally { checking = false; RefreshButton.IsEnabled = operations.Count == 0; }
+        finally { checking = false; RefreshActionAvailability(); }
     }
 
     private async void AppAction_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is not AppItem item || item.Busy) return;
+        if (batchUpdating || catalogChanging || (sender as FrameworkElement)?.DataContext is not AppItem item || item.Busy) return;
         if (operations.ContainsKey(SelfUpdateService.Definition.Id))
         { StatusText.Text = "런처 업데이트가 끝난 뒤 다시 시도하세요."; return; }
         if (item.IsLauncher)
@@ -238,19 +262,25 @@ public partial class MainWindow : Window
         if (item.Release is null)
         {
             item.Busy = true;
+            RefreshActionAvailability();
             try { await CheckOneAsync(item, lifetime.Token); }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             finally { item.Busy = false; ApplyFilter(); }
             NotifyUpdates([item]);
             return;
         }
+        await InstallItemAsync(item);
+    }
+
+    private async Task<UpdateOutcome> InstallItemAsync(AppItem item, bool updateOnly = false)
+    {
         using var cancellation = new CancellationTokenSource();
         operations[item.Definition.Id] = cancellation;
-        RefreshButton.IsEnabled = false;
         item.CanCancel = true;
         item.Busy = true;
         item.Error = null;
         item.Percent = 0;
+        RefreshActionAvailability();
         try
         {
             // Do not install using stale cache metadata when the source cannot be reached.
@@ -258,6 +288,13 @@ public partial class MainWindow : Window
             var fresh = await releases.GetLatestAsync(item.Definition, cancellation.Token);
             if (fresh.IsCached) throw new IOException("인터넷 연결을 확인한 뒤 설치를 다시 시도하세요.");
             item.Release = fresh.Release;
+            item.IsCached = false;
+            if (updateOnly)
+            {
+                item.Installed = await installations.FindInstalledAsync(item.Definition, cancellation.Token)
+                    ?? throw new IOException("설치된 프로그램을 찾을 수 없습니다. 목록을 다시 확인하세요.");
+                if (!item.HasUpdate) return UpdateOutcome.Completed;
+            }
             var progress = new Progress<InstallProgress>(p =>
             {
                 if (p.Stage.StartsWith("설치 프로그램", StringComparison.Ordinal) || p.Stage.StartsWith("설치 중", StringComparison.Ordinal)) item.CanCancel = false;
@@ -268,17 +305,75 @@ public partial class MainWindow : Window
             item.Installed = await installations.InstallAsync(item.Definition, fresh.Release, progress, cancellation.Token);
             item.IsCached = false;
             StatusText.Text = $"{item.Name} {item.Installed.Version} 설치를 완료했습니다.";
+            return UpdateOutcome.Completed;
         }
-        catch (OperationCanceledException) { StatusText.Text = $"{item.Name} 작업을 취소했습니다."; }
-        catch (Exception ex) { item.Error = ex.Message; ShowError(ex); }
-        finally { operations.Remove(item.Definition.Id); item.CanCancel = false; item.Busy = false; RefreshButton.IsEnabled = operations.Count == 0 && !checking; ApplyFilter(); }
+        catch (OperationCanceledException) { StatusText.Text = $"{item.Name} 작업을 취소했습니다."; return UpdateOutcome.Cancelled; }
+        catch (Exception ex) { item.Error = ex.Message; ShowError(ex); return UpdateOutcome.Failed; }
+        finally { operations.Remove(item.Definition.Id); item.CanCancel = false; item.Busy = false; ApplyFilter(); }
+    }
+
+    private async void UpdateAll_Click(object sender, RoutedEventArgs e) => await UpdateAllAsync();
+
+    private async Task UpdateAllAsync()
+    {
+        if (batchUpdating || catalogChanging || checking || operations.Count > 0 || items.Any(i => i.Busy)) return;
+        // Snapshot all known updates, independent of the current search or filter.
+        var pending = items.Where(i => i.HasUpdate && !i.NeedsConnection).OrderBy(i => i.IsLauncher).ToArray();
+        if (pending.Length == 0) return;
+        batchUpdating = true;
+        batchCancelRequested = false;
+        notifiedAppIds = null;
+        ShowLibrary();
+        filter = "updates";
+        PageTitle.Text = "업데이트";
+        SearchBox.Clear();
+        ApplyFilter();
+        ProgramScroll.ScrollToTop();
+        var completed = 0;
+        try
+        {
+            foreach (var item in pending)
+            {
+                if (batchCancelRequested || lifetime.IsCancellationRequested)
+                {
+                    StatusText.Text = $"전체 업데이트를 중단했습니다. {completed}/{pending.Length}개 처리 완료";
+                    return;
+                }
+                StatusText.Text = $"전체 업데이트 {completed + 1}/{pending.Length} · {item.Name}";
+                var outcome = item.IsLauncher ? await UpdateLauncherAsync(item) : await InstallItemAsync(item, updateOnly: true);
+                if (outcome == UpdateOutcome.Restarting) return;
+                if (outcome != UpdateOutcome.Completed)
+                {
+                    var reason = outcome == UpdateOutcome.Cancelled ? "취소" : "실패";
+                    StatusText.Text = $"{item.Name} 업데이트 {reason} · 남은 작업을 중단했습니다. {completed}/{pending.Length}개 처리 완료";
+                    return;
+                }
+                completed++;
+            }
+            StatusText.Text = $"전체 업데이트 완료 · {completed}개 프로그램 처리";
+        }
+        finally
+        {
+            batchUpdating = false;
+            if (!((App)Application.Current).IsExiting) ApplyFilter();
+        }
+    }
+
+    private void StopUpdates_Click(object sender, RoutedEventArgs e)
+    {
+        if (!batchUpdating || items.Any(i => i.IsLauncher && i.Busy && !i.CanCancel)) return;
+        batchCancelRequested = true;
+        foreach (var item in items.Where(i => i.CanCancel))
+            if (operations.TryGetValue(item.Definition.Id, out var cancellation)) cancellation.Cancel();
+        StatusText.Text = "전체 업데이트 중단 요청 · 진행 중인 설치가 끝나면 남은 작업을 중단합니다.";
+        RefreshActionAvailability();
     }
 
     private void LaunchItem(AppItem item)
     {
         try
         {
-            if (!item.CanLaunch || item.Installed is null || item.Busy) return;
+            if (batchUpdating || catalogChanging || !item.CanLaunch || item.Installed is null || item.Busy) return;
             installations.Launch(item.Installed);
             StatusText.Text = $"{item.Name} 실행을 요청했습니다.";
         }
@@ -357,13 +452,15 @@ public partial class MainWindow : Window
     private async Task EditAppAsync(AppItem? item)
     {
         if (item?.IsLauncher == true) return;
-        if (checking || items.Any(i => i.Busy)) { StatusText.Text = "진행 중인 작업이 끝나면 프로그램 설정을 변경할 수 있습니다."; return; }
+        if (batchUpdating || catalogChanging || checking || items.Any(i => i.Busy)) { StatusText.Text = "진행 중인 작업이 끝나면 프로그램 설정을 변경할 수 있습니다."; return; }
         var dialog = new AppEditorWindow(item?.Definition) { Owner = this };
         if (dialog.ShowDialog() != true || dialog.Result is null) return;
         if (dialog.Result.Id.Equals(SelfUpdateService.Definition.Id, StringComparison.OrdinalIgnoreCase))
         { StatusText.Text = "모아 런처 항목은 자동으로 관리합니다. 다른 프로그램 ID를 사용하세요."; return; }
         if (item is null && items.Any(i => i.Definition.Id.Equals(dialog.Result.Id, StringComparison.OrdinalIgnoreCase)))
         { StatusText.Text = "이미 등록된 ID입니다. 해당 앱의 ‘프로그램 설정’에서 변경하세요."; return; }
+        catalogChanging = true;
+        RefreshActionAvailability();
         try
         {
             var updated = overrides.Apps.Where(a => !a.Id.Equals(dialog.Result.Id, StringComparison.OrdinalIgnoreCase)).Append(dialog.Result).ToList();
@@ -376,12 +473,14 @@ public partial class MainWindow : Window
             SearchBox.Clear();
             var added = items.First(i => i.Definition.Id == dialog.Result.Id);
             added.Busy = true;
+            RefreshActionAvailability();
             try { await CheckOneAsync(added, lifetime.Token); }
             catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
             finally { added.Busy = false; ApplyFilter(); }
             NotifyUpdates([added]);
         }
         catch (Exception ex) { ShowError(ex); }
+        finally { catalogChanging = false; RefreshActionAvailability(); }
     }
 
     private void NotifyUpdates(IEnumerable<AppItem> checkedItems)
@@ -463,9 +562,11 @@ public partial class MainWindow : Window
 
     private async void ImportCatalog_Click(object sender, RoutedEventArgs e)
     {
-        if (checking || items.Any(i => i.Busy)) { StatusText.Text = "진행 중인 작업이 끝난 뒤 카탈로그를 가져오세요."; return; }
+        if (batchUpdating || catalogChanging || checking || items.Any(i => i.Busy)) { StatusText.Text = "진행 중인 작업이 끝난 뒤 카탈로그를 가져오세요."; return; }
         var dialog = new OpenFileDialog { Filter = "앱 카탈로그 (*.json)|*.json" };
         if (dialog.ShowDialog(this) != true) return;
+        catalogChanging = true;
+        RefreshActionAvailability();
         try
         {
             var imported = await CatalogService.LoadAsync(dialog.FileName);
@@ -480,6 +581,7 @@ public partial class MainWindow : Window
             StatusText.Text = $"프로그램 {imported.Apps.Count}개를 가져왔습니다.";
         }
         catch (Exception ex) { ShowError(ex); }
+        finally { catalogChanging = false; RefreshActionAvailability(); }
     }
     private async void ExportCatalog_Click(object sender, RoutedEventArgs e)
     {
@@ -488,17 +590,17 @@ public partial class MainWindow : Window
         try { await CatalogService.SaveAsync(dialog.FileName, new AppCatalog { Apps = items.Where(i => !i.IsLauncher).Select(i => i.Definition).ToList() }); StatusText.Text = "카탈로그를 내보냈습니다."; }
         catch (Exception ex) { ShowError(ex); }
     }
-    private async Task UpdateLauncherAsync(AppItem item)
+    private async Task<UpdateOutcome> UpdateLauncherAsync(AppItem item)
     {
         if (checking || operations.Count > 0)
-        { StatusText.Text = "다른 작업이 끝난 뒤 런처를 업데이트하세요."; return; }
+        { StatusText.Text = "다른 작업이 끝난 뒤 런처를 업데이트하세요."; return UpdateOutcome.Failed; }
         using var cancellation = new CancellationTokenSource();
         operations[item.Definition.Id] = cancellation;
         item.Busy = true;
         item.CanCancel = true;
         item.Error = null;
         item.Percent = 0;
-        RefreshButton.IsEnabled = false;
+        RefreshActionAvailability();
         item.Refresh();
         try
         {
@@ -506,25 +608,28 @@ public partial class MainWindow : Window
             if (fresh.IsCached) throw new IOException("인터넷 연결을 확인한 뒤 런처 업데이트를 다시 시도하세요.");
             item.Release = fresh.Release;
             item.IsCached = false;
-            if (!item.HasUpdate) { StatusText.Text = "이미 최신 런처 버전입니다."; return; }
+            if (!item.HasUpdate) { StatusText.Text = "이미 최신 런처 버전입니다."; return UpdateOutcome.Completed; }
             var progress = new Progress<InstallProgress>(p => { item.ProgressText = p.Stage; item.Percent = p.Percent; });
             var prepared = await selfUpdates.PrepareAsync(fresh.Release, LauncherVersion, progress, cancellation.Token);
             item.CanCancel = false;
             item.ProgressText = "런처를 업데이트하고 다시 시작합니다…";
             item.Refresh();
+            RefreshActionAvailability();
             await SelfUpdateCoordinator.PrepareHandoffAsync(prepared, AppContext.BaseDirectory, App.DataDirectory, !IsVisible, cancellation.Token);
             operations.Remove(item.Definition.Id);
+            // The final handoff is ready; release the batch exit guard only now.
+            batchUpdating = false;
             ((App)Application.Current).RequestExit();
+            return UpdateOutcome.Restarting;
         }
-        catch (OperationCanceledException) { StatusText.Text = "런처 업데이트를 취소했습니다."; }
-        catch (Exception ex) { item.Error = ex.Message; ShowError(ex); }
+        catch (OperationCanceledException) { StatusText.Text = "런처 업데이트를 취소했습니다."; return UpdateOutcome.Cancelled; }
+        catch (Exception ex) { item.Error = ex.Message; ShowError(ex); return UpdateOutcome.Failed; }
         finally
         {
             operations.Remove(item.Definition.Id);
             item.CanCancel = false;
             item.Busy = false;
-            RefreshButton.IsEnabled = !checking && operations.Count == 0;
-            ApplyFilter();
+            if (!((App)Application.Current).IsExiting) ApplyFilter();
         }
     }
 
@@ -552,7 +657,7 @@ public partial class MainWindow : Window
 
     internal bool TryPrepareExit()
     {
-        if (operations.Count == 0) return true;
+        if (!batchUpdating && !catalogChanging && operations.Count == 0) return true;
         StatusText.Text = "작업이 진행 중입니다. 다운로드를 취소하거나 설치가 끝난 뒤 트레이에서 종료해주세요.";
         return false;
     }

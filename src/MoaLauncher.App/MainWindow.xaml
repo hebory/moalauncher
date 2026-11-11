@@ -42,6 +42,11 @@
           <TextBlock x:Name="LibrarySummary" Text="0개 프로그램" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,6,0,0"/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+          <Button x:Name="UpdateAllButton" Content="모두 업데이트" Click="UpdateAll_Click" IsEnabled="False"
+                  Style="{StaticResource PrimaryButton}" FontSize="12" Margin="0,0,8,0"
+                  ToolTip="검색과 관계없이 일반 프로그램을 순서대로 업데이트한 뒤 런처를 마지막에 업데이트합니다. 실패하거나 취소하면 남은 작업을 중단합니다."/>
+          <Button x:Name="StopUpdatesButton" Content="전체 업데이트 중단" Click="StopUpdates_Click" Visibility="Collapsed"
+                  FontSize="12" Margin="0,0,8,0" ToolTip="다운로드는 취소하고, 이미 시작된 설치는 끝난 뒤 남은 업데이트를 중단합니다."/>
           <Button x:Name="RefreshButton" Content="업데이트 확인" Click="Refresh_Click" FontSize="12" Margin="0,0,8,0"/>
           <Button Content="+ 프로그램 추가" Click="AddApp_Click" FontSize="12"/>
         </StackPanel>

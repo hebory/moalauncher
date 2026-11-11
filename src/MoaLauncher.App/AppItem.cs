@@ -10,7 +10,8 @@ public sealed class AppItem(AppDefinition definition) : INotifyPropertyChanged
 {
     public AppDefinition Definition { get; } = definition;
     public bool IsLauncher { get; init; }
-    public bool CanEdit => !IsLauncher;
+    public bool CanEdit => !IsLauncher && !ActionsBlocked;
+    public bool ActionsBlocked { get; set; }
     public bool CanLaunch => IsInstalled && !IsLauncher;
     private AppRelease? release;
     private string notes = "릴리스를 확인하면 새 버전의 변경 사항을 여기에 표시합니다.";
@@ -49,7 +50,7 @@ public sealed class AppItem(AppDefinition definition) : INotifyPropertyChanged
     public string StatusText => Busy ? ProgressText : HasUpdate ? "업데이트 가능" : IsInstalled ? "사용 준비 완료" : NeedsConnection ? "저장소 연결 필요" : Release is not null ? "설치 가능" : "릴리스 확인 필요";
     public string StatusColor => Busy || HasUpdate ? "#5369E8" : IsInstalled ? "#43866B" : NeedsConnection ? "#9B773A" : "#7D879A";
     public string ActionText => Busy ? "작업 중…" : IsLauncher ? HasUpdate ? "업데이트 후 재시작" : Release is null || HasError ? "업데이트 확인" : "최신 버전" : NeedsConnection ? "저장소 연결" : HasUpdate ? "업데이트" : IsInstalled ? "실행하기  ↗" : Release is null ? "릴리스 확인" : "설치하기  ↓";
-    public bool CanAct => !Busy && (!IsLauncher || HasUpdate || Release is null || HasError);
+    public bool CanAct => !ActionsBlocked && !Busy && (!IsLauncher || HasUpdate || Release is null || HasError);
     public bool CanCancel { get; set; }
     public string Notes => notes;
     private bool busy;

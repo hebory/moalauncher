@@ -14,14 +14,23 @@ using TextBox = System.Windows.Controls.TextBox;
 
 namespace MoaLauncher.App.SmokeTests;
 
-internal sealed class UpdateNotificationChecks
+internal sealed partial class UpdateNotificationChecks
 {
     private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
     private readonly List<AppDefinition> definitions = [];
     private readonly Dictionary<string, ReleaseResult> releaseResults = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, InstalledApp> installed = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> releaseCalls = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<string> releaseCallOrder = [];
     private readonly List<string> installCalls = [];
+    private readonly HashSet<string> failedInstallIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, InstalledApp> refreshedInstallations = new(StringComparer.OrdinalIgnoreCase);
+    private TaskCompletionSource? installStarted;
+    private TaskCompletionSource? installGate;
+    private int installDelayMilliseconds;
+    private bool installReportsInstallerStarted;
+    private int activeInstallCount;
+    private int maximumConcurrentInstalls;
 
     internal IReleaseService ReleaseService { get; }
     internal IInstallationService InstallationService { get; }
@@ -207,7 +216,9 @@ internal sealed class UpdateNotificationChecks
 
         await CheckLauncherSelfUpdateAsync(app, window, items, visible, launcherItem, launcherVersion, notifyIcon);
 
-        Console.WriteLine("PASS: notification settings, app updates, built-in launcher notice navigation, and fake app installation.");
+        await RunBulkUpdateChecksAsync(window, items, launcherItem);
+
+        Console.WriteLine("PASS: notification settings, app updates, built-in launcher notice navigation, and sequential bulk updates.");
     }
 
     private async Task CheckLauncherSelfUpdateAsync(App app, MainWindow window, List<AppItem> items,
@@ -517,6 +528,7 @@ internal sealed class UpdateNotificationChecks
         {
             cancellationToken.ThrowIfCancellationRequested();
             owner.releaseCalls[app.Id] = owner.GetReleaseCallCount(app.Id) + 1;
+            owner.releaseCallOrder.Add(app.Id);
             return owner.releaseResults.TryGetValue(app.Id, out var result)
                 ? Task.FromResult(result)
                 : Task.FromException<ReleaseResult>(new InvalidOperationException($"No smoke release configured for {app.Id}."));
@@ -528,19 +540,36 @@ internal sealed class UpdateNotificationChecks
         public Task<InstalledApp?> FindInstalledAsync(AppDefinition app, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (owner.refreshedInstallations.Remove(app.Id, out var refreshed))
+                owner.installed[app.Id] = refreshed;
             owner.installed.TryGetValue(app.Id, out var appInstalled);
             return Task.FromResult(appInstalled);
         }
 
-        public Task<InstalledApp> InstallAsync(AppDefinition app, AppRelease release,
+        public async Task<InstalledApp> InstallAsync(AppDefinition app, AppRelease release,
             IProgress<InstallProgress>? progress = null, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             owner.installCalls.Add(app.Id);
-            var result = MakeInstalled(app, release.Tag);
-            owner.installed[app.Id] = result;
-            progress?.Report(new InstallProgress("설치 완료", 100, 100));
-            return Task.FromResult(result);
+            owner.installStarted?.TrySetResult();
+            var active = Interlocked.Increment(ref owner.activeInstallCount);
+            owner.maximumConcurrentInstalls = Math.Max(owner.maximumConcurrentInstalls, active);
+            try
+            {
+                if (owner.installReportsInstallerStarted)
+                    progress?.Report(new InstallProgress("설치 프로그램 실행", 20, 100));
+                if (owner.installGate is { } gate)
+                    await gate.Task.WaitAsync(cancellationToken);
+                else if (owner.installDelayMilliseconds > 0)
+                    await Task.Delay(owner.installDelayMilliseconds, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (owner.failedInstallIds.Contains(app.Id)) throw new IOException($"Fake installation failed for {app.Id}.");
+                var result = MakeInstalled(app, release.Tag);
+                owner.installed[app.Id] = result;
+                progress?.Report(new InstallProgress("설치 완료", 100, 100));
+                return result;
+            }
+            finally { Interlocked.Decrement(ref owner.activeInstallCount); }
         }
 
         public bool IsRunning(InstalledApp app) => false;
