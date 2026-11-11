@@ -40,7 +40,9 @@
 }
 ```
 
-기본 항목은 모아뷰(`hebory/moaview`)와 MoaVCS(`hebory/moavcs`)입니다. MoaVCS는 저장소의 [공식 등록 파일](https://github.com/hebory/moavcs/blob/master/moalauncher.json)을 기준으로 연결하며, `moavcs-*-win-x64-setup.exe` Inno 설치 파일과 `%LOCALAPPDATA%\Programs\moavcs\moavcs.exe`를 사용합니다. 공식 이미지는 `master` 브랜치의 `icon.png`, `cover.png`입니다. 기존 런처에도 이 등록 파일을 가져와 추가할 수 있습니다.
+기본 항목은 모아뷰(`hebory/moaview`), MoaVCS(`hebory/moavcs`), 모아검색(`hebory/moasearch`)입니다. MoaVCS는 저장소의 [공식 등록 파일](https://github.com/hebory/moavcs/blob/master/moalauncher.json)을 기준으로 연결하며, `moavcs-*-win-x64-setup.exe` Inno 설치 파일과 `%LOCALAPPDATA%\Programs\moavcs\moavcs.exe`를 사용합니다. 공식 이미지는 `master` 브랜치의 `icon.png`, `cover.png`입니다. 기존 런처에도 이 등록 파일을 가져와 추가할 수 있습니다.
+
+모아검색은 [공식 등록 파일](https://github.com/hebory/moasearch/blob/master/moalauncher.json)을 기준으로 `moasearch-*-win-x64-setup.exe` Inno 설치 파일과 `%LOCALAPPDATA%\Programs\moasearch\moasearch.exe`를 연결합니다. 아이콘·커버는 `master` 브랜치의 `icon.png`, `cover.png`를 사용합니다. 앱에서 사용하는 AI·OCR 모델은 설치 후 모아검색에서 별도로 내려받습니다.
 
 다른 프로그램을 등록할 때는 해당 프로그램의 실제 `계정명/저장소명`을 입력하세요. 빈 `repository`도 표시용 항목으로 읽을 수 있지만 릴리스를 조회하거나 설치할 수 없습니다.
 
