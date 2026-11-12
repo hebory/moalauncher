@@ -45,15 +45,19 @@ public partial class MainWindow : Window
 
     public MainWindow() : this(null, null) { }
 
-    internal MainWindow(IReleaseService? releaseService, IInstallationService? installationService)
+    internal MainWindow(IReleaseService? releaseService, IInstallationService? installationService,
+        GitHubAccountService? accountService = null)
     {
         InitializeComponent();
         startupRegistration = ((App)Application.Current).StartupRegistration;
+        gitHubCredentials = ((App)Application.Current).GitHubCredentials;
+        gitHubAccount = accountService ?? new GitHubAccountService(http);
+        gitHubCatalog = new GitHubCatalogService(http, gitHubCredentials);
         CheckIntervalInput.ItemsSource = LauncherSettings.SupportedCheckIntervalsMinutes
             .Select(minutes => new KeyValuePair<int, string>(minutes, minutes < 60 ? $"{minutes}분" : $"{minutes / 60}시간"))
             .ToList();
-        releases = releaseService ?? new GitHubReleaseService(http, Path.Combine(App.DataDirectory, "cache"));
-        installations = installationService ?? new InstallationService(http, App.DataDirectory);
+        releases = releaseService ?? new GitHubReleaseService(http, Path.Combine(App.DataDirectory, "cache"), gitHubCredentials);
+        installations = installationService ?? new InstallationService(http, App.DataDirectory, tokenProvider: gitHubCredentials);
         selfUpdates = new SelfUpdateService(http, App.DataDirectory);
         artwork = new AppArtworkService(http, Path.Combine(App.DataDirectory, "cache", "artwork"));
         LauncherVersionText.Text = $"Moa Launcher {LauncherVersion}";
@@ -90,6 +94,7 @@ public partial class MainWindow : Window
             ready = true;
             UpdateNotificationCheck.IsEnabled = true;
             ReadStartupSetting();
+            ReadGitHubConnection();
             ApplyCheckSchedule();
             if (settings.CheckOnStartup) await CheckAllAsync();
             ReadSelfUpdateResult();
@@ -101,6 +106,7 @@ public partial class MainWindow : Window
     private async Task LoadCatalogAsync()
     {
         var bundled = await CatalogService.LoadAsync(Path.Combine(AppContext.BaseDirectory, "catalog", "apps.json"));
+        CatalogService.ValidateBundled(bundled);
         if (File.Exists(CatalogPath))
         {
             try { overrides = await CatalogService.LoadAsync(CatalogPath); }
@@ -142,7 +148,7 @@ public partial class MainWindow : Window
         // Artwork is optional and does not delay the catalog, release checks, or app actions.
         foreach (var item in apps)
         {
-            if (item.IsLauncher) continue;
+            if (item.IsLauncher || item.IsPrivate) continue;
             try
             {
                 item.IconImage = await artwork.LoadAsync(item.Definition.IconUrl, cancellationToken);
@@ -186,6 +192,9 @@ public partial class MainWindow : Window
         var count = items.Count(i => i.HasUpdate && !i.NeedsConnection);
         UpdateAllButton.Content = batchUpdating ? "업데이트 중…" : count > 0 ? $"모두 업데이트 ({count})" : "모두 업데이트";
         UpdateAllButton.IsEnabled = CanUpdateAll;
+        ConnectGitHubButton.IsEnabled = CanChangeGitHubConnection;
+        DisconnectGitHubButton.IsEnabled = CanChangeGitHubConnection && gitHubConnected;
+        GitHubTokenInput.IsEnabled = CanChangeGitHubConnection;
         StopUpdatesButton.Visibility = batchUpdating ? Visibility.Visible : Visibility.Collapsed;
         StopUpdatesButton.IsEnabled = batchUpdating && !batchCancelRequested &&
             !items.Any(i => i.IsLauncher && i.Busy && !i.CanCancel);
@@ -202,6 +211,7 @@ public partial class MainWindow : Window
     {
         item.Error = null;
         item.ProgressText = "새 버전 확인 중…";
+        if (item.IsPrivate) { item.Release = null; item.IsCached = false; }
         try
         {
             if (!item.IsLauncher) item.Installed = await installations.FindInstalledAsync(item.Definition, ct);
@@ -288,6 +298,7 @@ public partial class MainWindow : Window
         {
             // Do not install using stale cache metadata when the source cannot be reached.
             item.ProgressText = "배포 정보 확인 중…";
+            if (item.IsPrivate) { item.Release = null; item.IsCached = false; }
             var fresh = await releases.GetLatestAsync(item.Definition, cancellation.Token);
             if (fresh.IsCached) throw new IOException("인터넷 연결을 확인한 뒤 설치를 다시 시도하세요.");
             item.Release = fresh.Release;
@@ -420,6 +431,8 @@ public partial class MainWindow : Window
     private void ShowSettings()
     {
         ReadStartupSetting();
+        ReadGitHubConnection();
+        RefreshActionAvailability();
         LibraryView.Visibility = Visibility.Collapsed;
         SettingsView.Visibility = Visibility.Visible;
         SelectNavigation(SettingsNav);
@@ -463,6 +476,7 @@ public partial class MainWindow : Window
         if (batchUpdating || catalogChanging || checking || items.Any(i => i.Busy)) { StatusText.Text = "진행 중인 작업이 끝나면 프로그램 설정을 변경할 수 있습니다."; return; }
         var dialog = new AppEditorWindow(item?.Definition) { Owner = this };
         if (dialog.ShowDialog() != true || dialog.Result is null) return;
+        if (!CanChangeGitHubConnection) { StatusText.Text = "진행 중인 작업이 끝난 뒤 프로그램 설정을 저장하세요."; return; }
         if (dialog.Result.Id.Equals(SelfUpdateService.Definition.Id, StringComparison.OrdinalIgnoreCase))
         { StatusText.Text = "모아 런처 항목은 자동으로 관리합니다. 다른 프로그램 ID를 사용하세요."; return; }
         if (item is null && items.Any(i => i.Definition.Id.Equals(dialog.Result.Id, StringComparison.OrdinalIgnoreCase)))
@@ -471,7 +485,8 @@ public partial class MainWindow : Window
         RefreshActionAvailability();
         try
         {
-            var updated = overrides.Apps.Where(a => !a.Id.Equals(dialog.Result.Id, StringComparison.OrdinalIgnoreCase)).Append(dialog.Result).ToList();
+            var resolved = await gitHubCatalog.ResolveVisibilityAsync(dialog.Result, lifetime.Token);
+            var updated = overrides.Apps.Where(a => !a.Id.Equals(resolved.Id, StringComparison.OrdinalIgnoreCase)).Append(resolved).ToList();
             await CatalogService.SaveAsync(CatalogPath, new AppCatalog { Apps = updated });
             await LoadCatalogAsync();
             StatusText.Text = $"{dialog.Result.Name} 프로그램 설정을 저장했습니다.";
@@ -573,6 +588,7 @@ public partial class MainWindow : Window
         if (batchUpdating || catalogChanging || checking || items.Any(i => i.Busy)) { StatusText.Text = "진행 중인 작업이 끝난 뒤 카탈로그를 가져오세요."; return; }
         var dialog = new OpenFileDialog { Filter = "앱 카탈로그 (*.json)|*.json" };
         if (dialog.ShowDialog(this) != true) return;
+        if (!CanChangeGitHubConnection) { StatusText.Text = "진행 중인 작업이 끝난 뒤 카탈로그를 가져오세요."; return; }
         catalogChanging = true;
         RefreshActionAvailability();
         try
@@ -583,7 +599,7 @@ public partial class MainWindow : Window
             var summary = string.Join("\n", imported.Apps.Take(10).Select(a => $"• {a.Name} — {a.Repository}"));
             if (MessageBox.Show(this, $"다음 배포자의 프로그램 {imported.Apps.Count}개를 등록합니다.\n같은 ID의 프로그램 설정은 변경됩니다.\n\n{summary}", "카탈로그 가져오기", MessageBoxButton.OKCancel, MessageBoxImage.Information) != MessageBoxResult.OK) return;
             var merged = overrides.Apps.ToDictionary(a => a.Id, StringComparer.OrdinalIgnoreCase);
-            foreach (var app in imported.Apps) merged[app.Id] = app;
+            foreach (var app in imported.Apps) merged[app.Id] = await gitHubCatalog.ResolveVisibilityAsync(app, lifetime.Token);
             await CatalogService.SaveAsync(CatalogPath, new AppCatalog { Apps = merged.Values.ToList() });
             await LoadCatalogAsync();
             StatusText.Text = $"프로그램 {imported.Apps.Count}개를 가져왔습니다.";
@@ -593,10 +609,21 @@ public partial class MainWindow : Window
     }
     private async void ExportCatalog_Click(object sender, RoutedEventArgs e)
     {
+        if (!CanChangeGitHubConnection) { StatusText.Text = "진행 중인 작업이 끝난 뒤 카탈로그를 내보내세요."; return; }
         var dialog = new SaveFileDialog { Filter = "앱 카탈로그 (*.json)|*.json", FileName = "moa-apps.json" };
         if (dialog.ShowDialog(this) != true) return;
-        try { await CatalogService.SaveAsync(dialog.FileName, new AppCatalog { Apps = items.Where(i => !i.IsLauncher).Select(i => i.Definition).ToList() }); StatusText.Text = "카탈로그를 내보냈습니다."; }
+        if (!CanChangeGitHubConnection) { StatusText.Text = "진행 중인 작업이 끝난 뒤 카탈로그를 내보내세요."; return; }
+        catalogChanging = true;
+        RefreshActionAvailability();
+        try
+        {
+            var candidates = items.Where(i => !i.IsLauncher).Select(i => i.Definition).ToArray();
+            var shared = await gitHubCatalog.CreatePublicExportAsync(candidates, lifetime.Token);
+            await CatalogService.SaveAsync(dialog.FileName, shared);
+            StatusText.Text = $"공개 앱 {shared.Apps.Count}개를 내보냈습니다. 비공개·미확인 항목 {candidates.Length - shared.Apps.Count}개 제외";
+        }
         catch (Exception ex) { ShowError(ex); }
+        finally { catalogChanging = false; RefreshActionAvailability(); }
     }
     private async Task<UpdateOutcome> UpdateLauncherAsync(AppItem item)
     {

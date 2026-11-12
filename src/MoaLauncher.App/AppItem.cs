@@ -38,6 +38,7 @@ public sealed class AppItem(AppDefinition definition) : INotifyPropertyChanged
     public bool HasCover => CoverImage is not null;
     public string Category => Definition.Category;
     public string Repository => Definition.Repository;
+    public bool IsPrivate => Definition.IsPrivate;
     public bool NeedsConnection => string.IsNullOrWhiteSpace(Repository);
     public bool HasRepository => !NeedsConnection;
     public bool HasUpdate => Release is not null && Installed is not null && ReleaseRules.IsNewer(Release.Tag, Installed.Version);
@@ -63,7 +64,8 @@ public sealed class AppItem(AppDefinition definition) : INotifyPropertyChanged
     private double percent;
     public double Percent { get => percent; set { percent = value; Changed(); } }
     public bool IsCached { get; set; }
-    public string SourceText => IsCached ? "오프라인 캐시 · 설치 전 다시 확인됩니다" : "GitHub Releases";
+    public string SourceText => IsPrivate ? "비공개 GitHub Releases · 개인 카탈로그" :
+        IsCached ? "오프라인 캐시 · 설치 전 다시 확인됩니다" : "GitHub Releases";
     public event PropertyChangedEventHandler? PropertyChanged;
     private void Changed([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     public void Refresh() => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));

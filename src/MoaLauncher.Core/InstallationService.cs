@@ -19,12 +19,13 @@ public sealed class InstallationService : IInstallationService
         WriteIndented = true
     };
 
-    public InstallationService(HttpClient client, string dataDirectory, string? localAppData = null)
+    public InstallationService(HttpClient client, string dataDirectory, string? localAppData = null,
+        IGitHubTokenProvider? tokenProvider = null)
     {
         ArgumentNullException.ThrowIfNull(client);
         _dataDirectory = Path.GetFullPath(dataDirectory ?? throw new ArgumentNullException(nameof(dataDirectory)));
         _localAppData = Path.GetFullPath(localAppData ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
-        _downloader = new VerifiedDownloader(client);
+        _downloader = new VerifiedDownloader(client, tokenProvider);
     }
 
     public async Task<InstalledApp?> FindInstalledAsync(AppDefinition app, CancellationToken cancellationToken = default)
@@ -71,11 +72,21 @@ public sealed class InstallationService : IInstallationService
         ArgumentNullException.ThrowIfNull(app);
         ArgumentNullException.ThrowIfNull(release);
         cancellationToken.ThrowIfCancellationRequested();
+        if (app.IsPrivate != release.IsPrivate)
+            throw new InvalidOperationException("앱 공개 설정과 확인된 릴리스의 접근 범위가 달라 설치를 중단했습니다. GitHub에서 최신 버전을 다시 확인하세요.");
         var package = ReleaseRules.SelectPackage(app);
         var asset = ReleaseRules.SelectAsset(release, package);
-        if (!ReleaseRules.ValidateAssetUrl(app.Repository, asset.DownloadUrl))
-            throw new InvalidDataException("릴리스 파일이 지정된 GitHub 저장소에서 오지 않았습니다.");
-        VerifiedDownloader.RequireAllowedReleaseUri(asset.DownloadUrl);
+        if (app.IsPrivate)
+        {
+            if (!ReleaseRules.ValidatePrivateAssetApiUrl(app.Repository, asset.ApiUrl))
+                throw new InvalidDataException("비공개 릴리스 파일 API 주소가 지정된 저장소와 일치하지 않습니다.");
+        }
+        else
+        {
+            if (!ReleaseRules.ValidateAssetUrl(app.Repository, asset.DownloadUrl))
+                throw new InvalidDataException("릴리스 파일이 지정된 GitHub 저장소에서 오지 않았습니다.");
+            VerifiedDownloader.RequireAllowedReleaseUri(asset.DownloadUrl);
+        }
         var previousInstall = await FindInstalledAsync(app, cancellationToken).ConfigureAwait(false);
         if (previousInstall is not null && IsRunning(previousInstall))
             throw new InvalidOperationException("프로그램이 실행 중이므로 파일을 교체하지 않았습니다. 앱을 닫은 뒤 다시 시도하세요.");
@@ -86,7 +97,8 @@ public sealed class InstallationService : IInstallationService
         try
         {
             progress?.Report(new InstallProgress("다운로드 준비", 0, asset.Size > 0 ? asset.Size : null));
-            var result = await _downloader.DownloadAsync(asset.DownloadUrl, downloadPath, MaxPackageBytes, progress, cancellationToken).ConfigureAwait(false);
+            var result = await _downloader.DownloadAssetAsync(asset, app.Repository, app.IsPrivate, downloadPath,
+                MaxPackageBytes, progress, cancellationToken).ConfigureAwait(false);
             var expectedHash = await GetExpectedSha256Async(release, asset, app.Repository, cancellationToken).ConfigureAwait(false);
             if (!CryptographicOperations.FixedTimeEquals(Convert.FromHexString(result.Sha256), Convert.FromHexString(expectedHash)))
                 throw new InvalidDataException("다운로드한 파일의 SHA-256 검증에 실패했습니다.");
@@ -281,10 +293,7 @@ public sealed class InstallationService : IInstallationService
         var checksumAsset = release.Assets.FirstOrDefault(a => a.Name.Equals(asset.Name + ".sha256", StringComparison.OrdinalIgnoreCase));
         if (checksumAsset is not null)
         {
-            if (!ReleaseRules.ValidateAssetUrl(repository, checksumAsset.DownloadUrl))
-                throw new InvalidDataException("체크섬 파일이 지정된 GitHub 저장소에서 오지 않았습니다.");
-            VerifiedDownloader.RequireAllowedReleaseUri(checksumAsset.DownloadUrl);
-            var text = await DownloadSmallTextAsync(checksumAsset.DownloadUrl, cancellationToken).ConfigureAwait(false);
+            var text = await DownloadChecksumAssetAsync(checksumAsset, repository, release.IsPrivate, cancellationToken).ConfigureAwait(false);
             if (VerifiedDownloader.TryParseChecksum(text, asset.Name, out var parsed) && parsed is not null) return parsed;
             var bare = text.Trim();
             if (IsSha256(bare)) return bare.ToUpperInvariant();
@@ -293,21 +302,30 @@ public sealed class InstallationService : IInstallationService
         checksumAsset = release.Assets.FirstOrDefault(a => a.Name.Equals("SHA256SUMS.txt", StringComparison.OrdinalIgnoreCase));
         if (checksumAsset is not null)
         {
-            if (!ReleaseRules.ValidateAssetUrl(repository, checksumAsset.DownloadUrl))
-                throw new InvalidDataException("체크섬 파일이 지정된 GitHub 저장소에서 오지 않았습니다.");
-            VerifiedDownloader.RequireAllowedReleaseUri(checksumAsset.DownloadUrl);
-            var text = await DownloadSmallTextAsync(checksumAsset.DownloadUrl, cancellationToken).ConfigureAwait(false);
+            var text = await DownloadChecksumAssetAsync(checksumAsset, repository, release.IsPrivate, cancellationToken).ConfigureAwait(false);
             if (VerifiedDownloader.TryParseChecksum(text, asset.Name, out var parsed) && parsed is not null) return parsed;
         }
         throw new InvalidDataException("릴리스에 이 파일과 일치하는 SHA-256 체크섬이 없어 설치를 중단했습니다.");
     }
 
-    private async Task<string> DownloadSmallTextAsync(Uri uri, CancellationToken cancellationToken)
+    private async Task<string> DownloadChecksumAssetAsync(ReleaseAsset asset, string repository, bool isPrivate,
+        CancellationToken cancellationToken)
     {
         var path = Path.Combine(_dataDirectory, "downloads", Guid.NewGuid().ToString("N") + ".checksum");
         try
         {
-            await _downloader.DownloadAsync(uri, path, 1024 * 1024, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (!isPrivate)
+            {
+                if (!ReleaseRules.ValidateAssetUrl(repository, asset.DownloadUrl))
+                    throw new InvalidDataException("체크섬 파일이 지정된 GitHub 저장소에서 오지 않았습니다.");
+                VerifiedDownloader.RequireAllowedReleaseUri(asset.DownloadUrl);
+            }
+            else if (!ReleaseRules.ValidatePrivateAssetApiUrl(repository, asset.ApiUrl))
+            {
+                throw new InvalidDataException("비공개 체크섬 API 주소가 지정된 저장소와 일치하지 않습니다.");
+            }
+            await _downloader.DownloadAssetAsync(asset, repository, isPrivate, path, 1024 * 1024,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
             return await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
         }
         finally

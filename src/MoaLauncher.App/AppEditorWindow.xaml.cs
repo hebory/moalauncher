@@ -18,6 +18,7 @@ public partial class AppEditorWindow : Window
         IdInput.Text = app.Id;
         IdInput.IsReadOnly = true;
         RepositoryInput.Text = app.Repository;
+        PrivateRepositoryCheck.IsChecked = app.IsPrivate;
         DescriptionInput.Text = app.Description;
         var package = app.Packages.FirstOrDefault();
         if (package is null) return;
@@ -55,6 +56,7 @@ public partial class AppEditorWindow : Window
             Result = (original ?? new AppDefinition()) with
             {
                 Id = IdInput.Text.Trim(), Name = name, Description = DescriptionInput.Text.Trim(), Repository = repository,
+                IsPrivate = PrivateRepositoryCheck.IsChecked == true,
                 Monogram = original?.Monogram ?? (name.Length > 0 ? name[..1] : "M"), Packages = packages,
                 IconUrl = sameRepository ? original!.IconUrl : null,
                 CoverUrl = sameRepository ? original!.CoverUrl : null

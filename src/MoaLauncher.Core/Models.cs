@@ -18,6 +18,7 @@ public sealed record AppDefinition
     public string? CoverUrl { get; init; }
     // Empty until the publisher's repository is known; never guess a source.
     public string Repository { get; init; } = "";
+    public bool IsPrivate { get; init; }
     public List<PackageDefinition> Packages { get; init; } = [];
 }
 
@@ -31,9 +32,9 @@ public sealed record PackageDefinition
     public string? InstallDirectory { get; init; }
 }
 
-public sealed record ReleaseAsset(string Name, Uri DownloadUrl, long Size, string? Sha256);
+public sealed record ReleaseAsset(string Name, Uri DownloadUrl, long Size, string? Sha256, Uri? ApiUrl = null);
 public sealed record AppRelease(string Tag, string Name, string Notes, Uri PageUrl,
-    DateTimeOffset PublishedAt, IReadOnlyList<ReleaseAsset> Assets);
+    DateTimeOffset PublishedAt, IReadOnlyList<ReleaseAsset> Assets, bool IsPrivate = false);
 public sealed record ReleaseResult(AppRelease Release, bool IsCached);
 public sealed record InstalledApp(string AppId, string Version, string ExecutablePath,
     string InstallDirectory, string PackageKind, DateTimeOffset InstalledAt);

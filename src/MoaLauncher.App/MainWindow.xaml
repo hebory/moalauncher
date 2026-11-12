@@ -125,6 +125,8 @@
                         </Grid>
                         <TextBlock Text="{Binding Description}" Foreground="{StaticResource MutedBrush}" FontSize="12"
                                    Margin="0,6,0,0" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+                        <TextBlock Text="비공개 · 개인 카탈로그" FontSize="10" Foreground="{StaticResource AccentBrush}" Margin="0,5,0,0"
+                                   Visibility="{Binding IsPrivate, Converter={StaticResource BoolVisibility}}"/>
                         <TextBlock Text="{Binding StatusText}" Foreground="{Binding StatusColor}" FontSize="11" Margin="0,8,0,0"/>
                       </StackPanel>
                       <StackPanel Grid.Column="2" VerticalAlignment="Center">
@@ -189,6 +191,25 @@
         </Border>
         <Border Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="22" Margin="0,16,0,0">
           <StackPanel>
+            <TextBlock Text="GitHub 연결" FontSize="15" FontWeight="Bold" Margin="0,0,0,12"/>
+            <TextBlock x:Name="GitHubStatusText" Text="연결 상태 확인 중…" FontSize="12" Margin="0,0,0,8"/>
+            <TextBlock Text="비공개 저장소의 앱을 설치하고 업데이트합니다. 토큰은 이 PC의 Windows 자격 증명 관리자에 보관합니다."
+                       TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,14"/>
+            <TextBlock Text="개인 액세스 토큰" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <PasswordBox x:Name="GitHubTokenInput" MaxLength="1280" Padding="10,8" FontSize="13"
+                         AutomationProperties.Name="GitHub 개인 액세스 토큰"/>
+            <TextBlock Text="Fine-grained 토큰에서 사용할 저장소를 선택하고 Contents 권한을 Read-only로 지정하세요."
+                       TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,8,0,12"/>
+            <WrapPanel>
+              <Button x:Name="ConnectGitHubButton" Content="연결" Click="ConnectGitHub_Click" IsEnabled="False"
+                      Style="{StaticResource PrimaryButton}" Margin="0,0,8,0"/>
+              <Button x:Name="DisconnectGitHubButton" Content="연결 해제" Click="DisconnectGitHub_Click" IsEnabled="False" Margin="0,0,8,0"/>
+              <Button Content="토큰 발급 페이지" Click="OpenGitHubTokenSettings_Click" Style="{StaticResource GhostButton}"/>
+            </WrapPanel>
+          </StackPanel>
+        </Border>
+        <Border Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="22" Margin="0,16,0,0">
+          <StackPanel>
             <TextBlock Text="프로그램과 데이터" FontSize="15" FontWeight="Bold" Margin="0,0,0,16"/>
             <TextBlock x:Name="DataPathText" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,14"/>
             <WrapPanel>
@@ -196,6 +217,8 @@
               <Button Content="카탈로그 가져오기" Click="ImportCatalog_Click" FontSize="11" Margin="0,0,8,8"/>
               <Button Content="카탈로그 내보내기" Click="ExportCatalog_Click" FontSize="11" Margin="0,0,0,8"/>
             </WrapPanel>
+            <TextBlock Text="비공개 앱은 이 PC의 개인 카탈로그에만 저장됩니다. 내보내기에는 공개 여부를 확인한 앱만 포함합니다."
+                       TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,6,0,0"/>
           </StackPanel>
         </Border>
         <DockPanel Margin="0,14,0,0">

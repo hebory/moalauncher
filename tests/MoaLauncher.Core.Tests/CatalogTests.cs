@@ -84,9 +84,29 @@ public sealed class CatalogTests
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "catalog", "apps.json"))) root = root.Parent;
         Assert.NotNull(root);
         var catalog = await CatalogService.LoadAsync(Path.Combine(root!.FullName, "catalog", "apps.json"));
+        CatalogService.ValidateBundled(catalog);
         var moaview = Assert.Single(catalog.Apps.Where(app => app.Id == "moaview"));
         Assert.Equal("https://raw.githubusercontent.com/hebory/moaview/main/icon.png", moaview.IconUrl);
         Assert.Equal("https://raw.githubusercontent.com/hebory/moaview/main/cover.png", moaview.CoverUrl);
+    }
+
+    [Fact]
+    public async Task PrivateAppsRoundTripOnlyThroughPersonalCatalog()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "moa-personal-catalog-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var personal = new AppCatalog { Apps = [ValidApp() with { IsPrivate = true }] };
+            Assert.Throws<InvalidDataException>(() => CatalogService.ValidateBundled(personal));
+            var path = Path.Combine(folder, "catalog.json");
+            await CatalogService.SaveAsync(path, personal);
+            var loaded = await CatalogService.LoadAsync(path);
+            Assert.True(Assert.Single(loaded.Apps).IsPrivate);
+        }
+        finally
+        {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
     }
 
     [Fact]

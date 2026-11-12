@@ -67,6 +67,21 @@ public static class ReleaseRules
                pathParts.Skip(4).All(part => part.Length > 0 && part is not ("." or "..") && !part.Contains('/') && !part.Contains('\\'));
     }
 
+    public static bool ValidatePrivateAssetApiUrl(string repository, Uri? url)
+    {
+        if (!CatalogService.IsRepository(repository) || url is null || !url.IsAbsoluteUri ||
+            !string.Equals(url.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(url.IdnHost, "api.github.com", StringComparison.OrdinalIgnoreCase) || !url.IsDefaultPort ||
+            !string.IsNullOrEmpty(url.UserInfo) || !string.IsNullOrEmpty(url.Query) || !string.IsNullOrEmpty(url.Fragment)) return false;
+        var repoParts = repository.Split('/');
+        var pathParts = url.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Uri.UnescapeDataString).ToArray();
+        return pathParts.Length == 6 && pathParts[0] == "repos" &&
+               string.Equals(pathParts[1], repoParts[0], StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(pathParts[2], repoParts[1], StringComparison.OrdinalIgnoreCase) &&
+               pathParts[3] == "releases" && pathParts[4] == "assets" &&
+               Regex.IsMatch(pathParts[5], "^[1-9][0-9]*$", RegexOptions.CultureInvariant);
+    }
+
     private static bool TryParseVersion(string value, out ParsedVersion version)
     {
         version = default;

@@ -13,6 +13,12 @@ public partial class App : Application
     private RegisteredWaitHandle? activationRegistration;
     private TrayIconService? trayIcon;
     internal Func<MainWindow> MainWindowFactory { get; set; } = () => new MainWindow();
+    private IGitHubCredentialStore? gitHubCredentials;
+    internal IGitHubCredentialStore GitHubCredentials
+    {
+        get => gitHubCredentials ??= new WindowsGitHubCredentialStore(DataDirectory);
+        set => gitHubCredentials = value;
+    }
     private IStartupRegistration? startupRegistration;
     internal IStartupRegistration StartupRegistration
     {

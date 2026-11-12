@@ -83,6 +83,13 @@ public static class CatalogService
         }
     }
 
+    public static void ValidateBundled(AppCatalog catalog)
+    {
+        Validate(catalog);
+        if (catalog.Apps.Any(app => app.IsPrivate))
+            throw new InvalidDataException("비공개 앱은 기본 카탈로그에 포함할 수 없습니다. 개인 카탈로그에 등록하세요.");
+    }
+
     internal static bool IsRepository(string? repository) =>
         repository is not null && Regex.IsMatch(repository, "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9_.-]{1,100}$");
 

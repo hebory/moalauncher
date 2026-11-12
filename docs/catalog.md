@@ -52,7 +52,7 @@
 
 ## GitHub Releases 요건
 
-`repository`는 공개 GitHub 저장소여야 합니다. 런처는 `releases/latest` API를 사용하며 draft와 prerelease는 설치 대상으로 삼지 않습니다. API에 등록된 파일 중 이름이 `assetPattern`에 맞는 배포 파일을 선택합니다. `browser_download_url`는 HTTPS와 해당 저장소의 release-download 주소를 사용해야 합니다. 임의 URL, 다른 저장소의 파일, 이름이 모호하게 겹치는 파일은 거부합니다.
+`repository`는 GitHub 저장소의 `owner/repo`입니다. 공개 저장소는 익명으로 조회하고 비공개 저장소는 개인 항목에 `"isPrivate": true`를 지정한 뒤 설정에서 GitHub 토큰을 연결합니다. 런처는 `releases/latest` API를 사용하며 draft와 prerelease는 설치 대상으로 삼지 않습니다. API에 등록된 파일 중 이름이 `assetPattern`에 맞는 배포 파일을 선택합니다. `browser_download_url`는 HTTPS와 해당 저장소의 release-download 주소를 사용해야 합니다. 비공개 자산과 체크섬은 같은 저장소의 `api.github.com/repos/{owner}/{repo}/releases/assets/{id}`로 요청합니다. 임의 URL, 다른 저장소의 파일, 이름이 모호하게 겹치는 파일은 거부합니다.
 
 릴리스 태그는 `v1.2.3` 또는 `1.2.3`처럼 Semantic Versioning을 사용하세요. 버전 비교가 가능한 태그여야 업데이트를 표시합니다. Inno Setup의 실행 파일 ProductVersion도 같은 버전이어야 하며, 설치기는 `/SILENT /DIR=... /NORESTART` 실행을 지원해야 합니다. 무인 설치에서 건너뛰는 필수 구성 요소가 있다면 앱 배포자가 설치기에 포함하거나 별도로 안내해야 합니다.
 
@@ -60,4 +60,8 @@
 
 ## 카탈로그 가져오기와 내보내기
 
-설정에서 공개 JSON 파일을 가져올 수 있습니다. 파일을 선택하면 런처가 앱 이름과 저장소 목록을 보여 주고 승인을 받은 항목을 병합합니다. JSON 앱 카탈로그를 신뢰할 수 있는 게시자의 GitHub Release에서 배포하세요. JSON을 가져오는 것만으로 앱이 자동 다운로드되거나 설치되지는 않습니다. 내보내기는 현재 화면에 표시하는 기본 앱과 사용자 앱을 JSON 파일로 저장합니다.
+설정에서 JSON 파일을 가져올 수 있습니다. 파일을 선택하면 런처가 앱 이름과 저장소 목록을 보여 주고 승인을 받은 항목을 개인 카탈로그에 병합합니다. 공개로 표시된 항목도 GitHub에서 실제 공개 여부를 확인하며, 연결한 계정으로 비공개 저장소가 확인되면 자동으로 개인 항목으로 저장합니다. 이미 `isPrivate`가 켜진 항목은 인증을 연결하기 전에도 개인 목록에 보관할 수 있습니다. JSON을 가져오는 것만으로 앱이 자동 다운로드되거나 설치되지는 않습니다.
+
+내보내기는 비공개 항목을 제외하고, 나머지도 익명 GitHub API로 공개 여부를 다시 확인한 후 저장합니다. 비공개로 바뀌었거나 찾을 수 없는 저장소와 미연결 항목은 제외하며, 연결 장애로 공개 여부를 확인할 수 없으면 파일을 저장하지 않습니다. 기본 카탈로그에는 `isPrivate: true` 항목을 넣을 수 없습니다. 공유 JSON에는 토큰을 넣지 마세요.
+
+GitHub 인증에는 선택한 저장소의 **Contents: Read-only** 권한이 있는 fine-grained 개인 액세스 토큰을 사용합니다. 토큰은 Windows 자격 증명 관리자에 저장하고 공개 앱의 릴리스 조회·공유 내보내기·외부 다운로드 서버에는 보내지 않습니다. 비공개 릴리스 정보는 디스크 캐시를 사용하지 않으며, 계정 변경·연결 해제 시 메모리의 비공개 릴리스 정보를 비웁니다. 비공개 앱의 원격 아이콘·커버는 불러오지 않고 모노그램을 표시합니다. API 동작과 권한은 [GitHub 릴리스](https://docs.github.com/en/rest/releases/releases)와 [릴리스 자산 문서](https://docs.github.com/en/rest/releases/assets)를 참고하세요.

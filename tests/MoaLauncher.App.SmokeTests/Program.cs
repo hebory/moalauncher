@@ -37,15 +37,17 @@ internal static class Program
         var app = new App();
         var startupRegistration = new FakeStartupRegistration();
         var updateChecks = new UpdateNotificationChecks();
+        using var gitHubChecks = new GitHubSettingsChecks();
         app.StartupRegistration = startupRegistration;
-        app.MainWindowFactory = () => new MainWindow(updateChecks.ReleaseService, updateChecks.InstallationService);
+        app.GitHubCredentials = gitHubChecks.Credentials;
+        app.MainWindowFactory = () => new MainWindow(updateChecks.ReleaseService, updateChecks.InstallationService, gitHubChecks.AccountService);
         SetDataDirectory(dataDirectory);
         app.InitializeComponent();
         app.Startup += (_, _) => app.Dispatcher.BeginInvoke(new Action(async () =>
         {
             try
             {
-                await RunLifecycleChecksAsync(app, dataDirectory, testDataRoot, startupRegistration, updateChecks, startsInBackground);
+                await RunLifecycleChecksAsync(app, dataDirectory, testDataRoot, startupRegistration, updateChecks, gitHubChecks, startsInBackground);
             }
             catch (Exception ex)
             {
@@ -107,7 +109,7 @@ internal static class Program
     }
 
     private static async Task RunLifecycleChecksAsync(App app, string dataDirectory, string testDataRoot,
-        FakeStartupRegistration startupRegistration, UpdateNotificationChecks updateChecks, bool startsInBackground)
+        FakeStartupRegistration startupRegistration, UpdateNotificationChecks updateChecks, GitHubSettingsChecks gitHubChecks, bool startsInBackground)
     {
         await WaitUntilAsync(() => app.MainWindow is not null && GetField<bool>(app.MainWindow, "ready"),
             "MainWindow initialization", app.Dispatcher);
@@ -138,6 +140,7 @@ internal static class Program
         }
 
         StartupRegistrationChecks.Run();
+        await GitHubCredentialChecks.RunAsync(dataDirectory);
         await ArtworkChecks.RunAsync(dataDirectory);
         await CheckStartupSettingToggleAsync(window, startupRegistration);
 
@@ -179,6 +182,7 @@ internal static class Program
         if (!window.IsVisible) throw new InvalidOperationException("Tray open menu action did not restore the window.");
 
         await updateChecks.RunAsync(app, window);
+        await gitHubChecks.RunAsync(window, dataDirectory);
 
         var operations = GetField<Dictionary<string, CancellationTokenSource>>(window, "operations");
         using (var syntheticOperation = new CancellationTokenSource())
