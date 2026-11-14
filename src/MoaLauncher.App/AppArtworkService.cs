@@ -1,13 +1,15 @@
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Windows.Media.Imaging;
+using MoaLauncher.Core;
 
 namespace MoaLauncher.App;
 
-internal sealed class AppArtworkService(HttpClient http, string cacheDirectory)
+internal sealed class AppArtworkService(HttpClient http, string cacheDirectory, IGitHubTokenProvider? tokenProvider = null)
 {
     private const int MaximumBytes = 8 * 1024 * 1024;
     private const int MaximumDimension = 8192;
@@ -15,6 +17,48 @@ internal sealed class AppArtworkService(HttpClient http, string cacheDirectory)
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
     private readonly HttpClient _http = http ?? throw new ArgumentNullException(nameof(http));
     private readonly string _cacheDirectory = Path.GetFullPath(cacheDirectory ?? throw new ArgumentNullException(nameof(cacheDirectory)));
+
+    internal async Task<BitmapSource?> LoadAsync(AppDefinition app, string? url, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!CatalogService.IsRepositoryImageUrl(url, app.Repository) || !TryGetArtworkUri(url, out var rawUri)) return null;
+        if (!app.IsPrivate) return await LoadAsync(url, cancellationToken).ConfigureAwait(false);
+
+        // Keep private bytes in memory and attach credentials only to the Contents API.
+        // Catalog validation pins the raw URL to the same repository and a single ref segment.
+        try
+        {
+            var token = tokenProvider?.GetToken();
+            if (string.IsNullOrWhiteSpace(token)) return null;
+            var parts = rawUri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Uri.UnescapeDataString).ToArray();
+            var repository = string.Join('/', parts.Take(2).Select(Uri.EscapeDataString));
+            var path = string.Join('/', parts.Skip(3).Select(Uri.EscapeDataString));
+            var apiUri = new Uri($"https://api.github.com/repos/{repository}/contents/{path}?ref={Uri.EscapeDataString(parts[2])}");
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(RequestTimeout);
+            using var request = new HttpRequestMessage(HttpMethod.Get, apiUri);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github.raw+json"));
+            request.Headers.UserAgent.ParseAdd("MoaLauncher/" + (typeof(AppArtworkService).Assembly.GetName().Version?.ToString(3) ?? "0.0.0"));
+            request.Headers.TryAddWithoutValidation("X-GitHub-Api-Version", "2022-11-28");
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
+            if (response.StatusCode != HttpStatusCode.OK || response.RequestMessage?.RequestUri != apiUri ||
+                response.Content.Headers.ContentLength is > MaximumBytes) return null;
+            await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
+            var bytes = await ReadBoundedAsync(stream, timeout.Token).ConfigureAwait(false);
+            if (bytes is null) return null;
+            var image = await Task.Run(() => DecodeImage(bytes), cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            return string.Equals(tokenProvider?.GetToken(), token, StringComparison.Ordinal) ? image : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception)
+        {
+            // Optional artwork must not expose credential-bearing exception messages or response bodies.
+            return null;
+        }
+    }
 
     internal async Task<BitmapSource?> LoadAsync(string? url, CancellationToken cancellationToken = default)
     {

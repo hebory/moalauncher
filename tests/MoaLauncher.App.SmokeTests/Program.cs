@@ -141,6 +141,7 @@ internal static class Program
         StartupRegistrationChecks.Run();
         await GitHubCredentialChecks.RunAsync(dataDirectory);
         await ArtworkChecks.RunAsync(dataDirectory);
+        await PrivateArtworkChecks.RunAsync(dataDirectory);
         await CheckStartupSettingToggleAsync(window, startupRegistration);
 
         if (!startsInBackground)

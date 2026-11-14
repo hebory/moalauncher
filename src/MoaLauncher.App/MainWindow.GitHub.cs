@@ -81,15 +81,20 @@ public partial class MainWindow
 
     private void ClearPrivateReleaseState()
     {
+        // Invalidate in-flight loads so a previous account's image cannot reappear.
+        artworkGeneration++;
         foreach (var item in items.Where(item => item.IsPrivate))
         {
             item.Release = null;
             item.IsCached = false;
             item.Error = null;
             item.ProgressText = "";
+            item.IconImage = null;
+            item.CoverImage = null;
             item.Refresh();
         }
         ApplyFilter();
+        ReloadArtwork();
     }
 
     private void OpenGitHubTokenSettings_Click(object sender, RoutedEventArgs e) =>

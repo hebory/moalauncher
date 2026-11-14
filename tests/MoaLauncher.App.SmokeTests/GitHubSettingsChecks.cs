@@ -69,11 +69,17 @@ internal sealed class GitHubSettingsChecks : IDisposable
             }
             Invoke(window, "RefreshActionAvailability");
             privateItem.Release = PrivateRelease();
+            var artwork = System.Windows.Media.Imaging.BitmapSource.Create(1, 1, 96, 96,
+                System.Windows.Media.PixelFormats.Bgra32, null, new byte[] { 0, 0, 0, 255 }, 4);
+            artwork.Freeze();
+            privateItem.IconImage = artwork;
+            privateItem.CoverImage = artwork;
             input.Password = SecondToken;
             connect.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await DrainAsync(window);
-            Require(Credentials.GetToken() == SecondToken && privateItem.Release is null,
-                "Replacing the credential did not invalidate the previous account's private release.");
+            Require(Credentials.GetToken() == SecondToken && privateItem.Release is null &&
+                    privateItem.IconImage is null && privateItem.CoverImage is null,
+                "Replacing the credential did not invalidate the previous account's private release and artwork.");
 
             privateItem.Release = PrivateRelease();
             // The fake release service refuses this repository, as it would after access is revoked.
@@ -82,9 +88,11 @@ internal sealed class GitHubSettingsChecks : IDisposable
             Require(privateItem.Release is null && privateItem.HasError,
                 "An inaccessible private source retained an earlier release for installation.");
             privateItem.Release = PrivateRelease();
+            privateItem.IconImage = artwork;
+            privateItem.CoverImage = artwork;
             disconnect.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Require(Credentials.GetToken() is null && privateItem.Release is null && privateItem.IsInstalled &&
-                    !disconnect.IsEnabled && items.Contains(privateItem),
+                    privateItem.IconImage is null && privateItem.CoverImage is null && !disconnect.IsEnabled && items.Contains(privateItem),
                 "Disconnect did not clear authorization, or removed the personal app/installation.");
 
             var editor = new AppEditorWindow(definition) { Owner = window };

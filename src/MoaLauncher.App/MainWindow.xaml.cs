@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private readonly IStartupRegistration startupRegistration;
     private readonly SelfUpdateService selfUpdates;
     private readonly AppArtworkService artwork;
+    private int artworkGeneration;
     internal static string LauncherVersion => typeof(App).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
     private readonly List<AppItem> items = [];
     private readonly ObservableCollection<AppItem> visibleItems = [];
@@ -59,7 +60,7 @@ public partial class MainWindow : Window
         releases = releaseService ?? new GitHubReleaseService(http, Path.Combine(App.DataDirectory, "cache"), gitHubCredentials);
         installations = installationService ?? new InstallationService(http, App.DataDirectory, tokenProvider: gitHubCredentials);
         selfUpdates = new SelfUpdateService(http, App.DataDirectory);
-        artwork = new AppArtworkService(http, Path.Combine(App.DataDirectory, "cache", "artwork"));
+        artwork = new AppArtworkService(http, Path.Combine(App.DataDirectory, "cache", "artwork"), gitHubCredentials);
         LauncherVersionText.Text = $"Moa Launcher {LauncherVersion}";
         AppCards.ItemsSource = visibleItems;
         DataPathText.Text = App.DataDirectory;
@@ -141,19 +142,30 @@ public partial class MainWindow : Window
             items.Add(item);
         }
         ApplyFilter();
+        ReloadArtwork();
+    }
+
+    private void ReloadArtwork()
+    {
+        artworkGeneration++;
         _ = LoadArtworkAsync(items.ToArray(), lifetime.Token);
     }
 
     private async Task LoadArtworkAsync(IEnumerable<AppItem> apps, CancellationToken cancellationToken)
     {
         // Artwork is optional and does not delay the catalog, release checks, or app actions.
-        foreach (var item in apps)
+        var generation = artworkGeneration;
+        foreach (var item in apps.OrderByDescending(item => item.IsPrivate))
         {
-            if (item.IsLauncher || item.IsPrivate) continue;
+            if (item.IsLauncher) continue;
             try
             {
-                item.IconImage = await artwork.LoadAsync(item.Definition.IconUrl, cancellationToken);
-                item.CoverImage = await artwork.LoadAsync(item.Definition.CoverUrl, cancellationToken);
+                var icon = await artwork.LoadAsync(item.Definition, item.Definition.IconUrl, cancellationToken);
+                if (generation != artworkGeneration || cancellationToken.IsCancellationRequested) return;
+                item.IconImage = icon;
+                var cover = await artwork.LoadAsync(item.Definition, item.Definition.CoverUrl, cancellationToken);
+                if (generation != artworkGeneration || cancellationToken.IsCancellationRequested) return;
+                item.CoverImage = cover;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
             catch (Exception ex) { App.Log(ex); }
@@ -404,7 +416,11 @@ public partial class MainWindow : Window
     {
         if ((sender as FrameworkElement)?.DataContext is AppItem item && operations.TryGetValue(item.Definition.Id, out var cancellation)) cancellation.Cancel();
     }
-    private async void Refresh_Click(object sender, RoutedEventArgs e) => await CheckAllAsync();
+    private async void Refresh_Click(object sender, RoutedEventArgs e)
+    {
+        await CheckAllAsync();
+        ReloadArtwork();
+    }
     private void Search_Changed(object sender, TextChangedEventArgs e) { if (ready) ApplyFilter(); }
     private async void ViewMode_Changed(object sender, RoutedEventArgs e)
     {
