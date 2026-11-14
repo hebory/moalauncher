@@ -504,7 +504,12 @@ fn validate_installer_hash(path: &Path, expected: &str) -> Result<(), String> {
     }
     Ok(())
 }
-fn validate_helper_layout(plan_path: &Path, data: &Path, installer: &Path, runner: &Path) -> Result<(), String> {
+fn validate_helper_layout(
+    plan_path: &Path,
+    data: &Path,
+    installer: &Path,
+    runner: &Path,
+) -> Result<(), String> {
     let job = plan_path.parent().ok_or("작업 폴더가 없습니다.")?;
     let self_update = canonical(&data.join("self-update"))?;
     if plan_path.file_name().and_then(|n| n.to_str()) != Some("plan.json")
@@ -629,16 +634,37 @@ fn write_new(p: &Path, b: &[u8]) -> Result<(), String> {
 }
 #[cfg(windows)]
 fn process_start(pid: u32) -> Option<u64> {
-    use windows_sys::Win32::{Foundation::{CloseHandle, FILETIME}, System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION}};
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, FILETIME},
+        System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+    };
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-    if handle.is_null() { return None; }
-    let mut created = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
-    let mut exited = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
-    let mut kernel = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
-    let mut user = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+    if handle.is_null() {
+        return None;
+    }
+    let mut created = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let mut exited = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let mut kernel = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let mut user = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
     let ok = unsafe { GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user) };
-    unsafe { CloseHandle(handle); }
-    if ok == 0 { return None; }
+    unsafe {
+        CloseHandle(handle);
+    }
+    if ok == 0 {
+        return None;
+    }
     Some((u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
 }
 #[cfg(not(windows))]
@@ -806,7 +832,8 @@ mod tests {
     use super::*;
 
     fn temp_root() -> PathBuf {
-        let root = std::env::temp_dir().join(format!("moa-helper-test-{}", uuid::Uuid::new_v4().simple()));
+        let root =
+            std::env::temp_dir().join(format!("moa-helper-test-{}", uuid::Uuid::new_v4().simple()));
         fs::create_dir_all(&root).unwrap();
         root
     }
@@ -814,12 +841,18 @@ mod tests {
     #[test]
     fn helper_rejects_bad_installer_hashes_and_job_paths() {
         let root = temp_root();
-        let data = root.join("data");
-        let job = data.join("self-update").join(uuid::Uuid::new_v4().simple().to_string());
-        let runner = job.join("runner");
-        fs::create_dir_all(&runner).unwrap();
-        let installer = job.join("MoaLauncher-1.2.3-Setup-x64.exe");
-        fs::write(&installer, b"fixture installer bytes").unwrap();
+        let data_path = root.join("data");
+        let job_path = data_path
+            .join("self-update")
+            .join(uuid::Uuid::new_v4().simple().to_string());
+        let runner_path = job_path.join("runner");
+        fs::create_dir_all(&runner_path).unwrap();
+        let installer_path = job_path.join("MoaLauncher-1.2.3-Setup-x64.exe");
+        fs::write(&installer_path, b"fixture installer bytes").unwrap();
+        let data = canonical(&data_path).unwrap();
+        let job = canonical(&job_path).unwrap();
+        let runner = canonical(&runner_path).unwrap();
+        let installer = canonical(&installer_path).unwrap();
         let plan = job.join("plan.json");
         assert!(validate_helper_layout(&plan, &data, &installer, &runner).is_ok());
         assert!(validate_helper_layout(&plan, &data, &installer, &root).is_err());
@@ -834,7 +867,10 @@ mod tests {
     fn installer_filename_and_release_version_are_restricted() {
         assert!(installer_name("MoaLauncher-1.2.3-Setup-x64.exe"));
         assert!(!installer_name("MoaLauncher-1.2.3-Setup-x64.exe.exe"));
-        assert_eq!(normalize_tag("v1.2.3-rc.1+build").unwrap(), "1.2.3-rc.1+build");
+        assert_eq!(
+            normalize_tag("v1.2.3-rc.1+build").unwrap(),
+            "1.2.3-rc.1+build"
+        );
         assert!(normalize_tag("../../other.exe").is_err());
     }
 
