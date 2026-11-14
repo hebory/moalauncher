@@ -1,4 +1,4 @@
-use crate::models::{AppDefinition, Catalog, InstalledApp, Settings};
+use crate::models::{Catalog, InstalledApp, Settings};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     collections::HashSet,

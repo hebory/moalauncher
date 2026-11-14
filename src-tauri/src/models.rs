@@ -49,7 +49,7 @@ impl Default for PackageDefinition {
 fn default_architecture() -> String { "x64".into() }
 fn default_kind() -> String { "zip".into() }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     #[serde(default = "yes", alias = "CheckOnStartup")] pub check_on_startup: bool,
