@@ -1,5 +1,7 @@
 # Rust 보안·연결 검증
 
+> 이 문서는 2026-11-15의 Rust + Tauri 2 구현 검증 기록입니다. Tauri 앱과 그 의존성은 현재 브랜치에서 제거되었습니다. 현재 네이티브 eframe/egui Cargo.lock 감사 결과는 [네이티브 검증](native-verification.md)을 참고하세요. 아래 Tauri·React 테스트 및 프로필 확인 결과는 과거 구현의 기록입니다.
+
 검토일: 2026-11-15
 
 ## 의존성 감사
