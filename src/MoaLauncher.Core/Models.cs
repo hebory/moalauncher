@@ -28,7 +28,7 @@ public sealed record PackageDefinition
     public string Kind { get; init; } = "zip";
     public string AssetPattern { get; init; } = "";
     public string ExecutablePath { get; init; } = "";
-    // Relative to LocalApplicationData. Required only for Inno Setup packages.
+    // Relative to LocalApplicationData. Required for Inno Setup and NSIS packages.
     public string? InstallDirectory { get; init; }
 }
 

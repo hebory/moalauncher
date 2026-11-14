@@ -70,6 +70,7 @@
                 <ComboBox x:Name="KindInput" SelectedIndex="0" Margin="0,6,0,0" SelectionChanged="Kind_Changed">
                   <ComboBoxItem Content="포터블 ZIP" Tag="zip"/>
                   <ComboBoxItem Content="Inno Setup 설치 파일" Tag="inno"/>
+                  <ComboBoxItem Content="NSIS 설치 파일" Tag="nsis"/>
                 </ComboBox>
               </StackPanel>
               <StackPanel Grid.Column="2">
@@ -94,7 +95,7 @@
             <StackPanel x:Name="InstallDirectoryPanel" Visibility="Collapsed" Margin="0,14,0,0">
               <TextBlock Text="설치 폴더 · %LOCALAPPDATA% 기준" FontSize="11"
                          FontWeight="SemiBold" Foreground="#525D70"/>
-              <TextBox x:Name="DirectoryInput" Margin="0,6,0,0" ToolTip="예: Programs/MyApp"
+              <TextBox x:Name="DirectoryInput" Margin="0,6,0,0" ToolTip="예: Programs/MyApp · NSIS 설치기는 /S와 /D=절대경로를 지원해야 합니다."
                        AutomationProperties.Name="설치 폴더"/>
             </StackPanel>
           </StackPanel>

@@ -25,12 +25,12 @@ public partial class AppEditorWindow : Window
         PatternInput.Text = package.AssetPattern;
         ExecutableInput.Text = package.ExecutablePath;
         DirectoryInput.Text = package.InstallDirectory ?? "";
-        KindInput.SelectedIndex = package.Kind == "inno" ? 1 : 0;
+        KindInput.SelectedIndex = package.Kind switch { "inno" => 1, "nsis" => 2, _ => 0 };
         ArchitectureInput.SelectedIndex = package.Architecture switch { "arm64" => 1, "x86" => 2, _ => 0 };
     }
     private void Kind_Changed(object sender, SelectionChangedEventArgs e)
     {
-        if (InstallDirectoryPanel is not null) InstallDirectoryPanel.Visibility = KindInput.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
+        if (InstallDirectoryPanel is not null) InstallDirectoryPanel.Visibility = KindInput.SelectedIndex is 1 or 2 ? Visibility.Visible : Visibility.Collapsed;
     }
     private void Save_Click(object sender, RoutedEventArgs e)
     {
@@ -41,13 +41,14 @@ public partial class AppEditorWindow : Window
             if (repository.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) repository = repository[..^4];
             if (repository.Length == 0) throw new ArgumentException("GitHub 저장소를 입력하세요.");
             var name = NameInput.Text.Trim();
+            var kind = ((ComboBoxItem)KindInput.SelectedItem).Tag.ToString()!;
             var package = new PackageDefinition
             {
                 Architecture = ((ComboBoxItem)ArchitectureInput.SelectedItem).Content.ToString()!,
-                Kind = KindInput.SelectedIndex == 1 ? "inno" : "zip",
+                Kind = kind,
                 AssetPattern = PatternInput.Text.Trim(),
                 ExecutablePath = ExecutableInput.Text.Trim(),
-                InstallDirectory = KindInput.SelectedIndex == 1 ? DirectoryInput.Text.Trim() : null
+                InstallDirectory = kind is "inno" or "nsis" ? DirectoryInput.Text.Trim() : null
             };
             // Preserve the other architectures of imported multi-platform entries.
             var packages = original?.Packages.Where(p => p.Architecture != package.Architecture).ToList() ?? [];

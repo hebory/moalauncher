@@ -37,7 +37,7 @@ public sealed class InstallationService : IInstallationService
         var expectedExecutable = SafePaths.ResolveRelative(expectedDirectory, package.ExecutablePath);
         var statePath = GetStatePath(app);
 
-        if (package.Kind.Equals("inno", StringComparison.OrdinalIgnoreCase) && File.Exists(expectedExecutable))
+        if (IsExecutableInstaller(package) && File.Exists(expectedExecutable))
         {
             var actualVersion = ReadProductVersion(expectedExecutable);
             if (actualVersion is null) return null;
@@ -106,8 +106,8 @@ public sealed class InstallationService : IInstallationService
             cancellationToken.ThrowIfCancellationRequested();
             if (package.Kind.Equals("zip", StringComparison.OrdinalIgnoreCase))
                 return await InstallZipAsync(app, release, package, downloadPath, progress, cancellationToken).ConfigureAwait(false);
-            if (package.Kind.Equals("inno", StringComparison.OrdinalIgnoreCase))
-                return await InstallInnoAsync(app, release, package, downloadPath, progress, cancellationToken).ConfigureAwait(false);
+            if (IsExecutableInstaller(package))
+                return await InstallExecutableAsync(app, release, package, downloadPath, progress, cancellationToken).ConfigureAwait(false);
             throw new NotSupportedException($"지원하지 않는 설치 패키지입니다: {package.Kind}");
         }
         finally
@@ -195,7 +195,7 @@ public sealed class InstallationService : IInstallationService
         }
     }
 
-    private async Task<InstalledApp> InstallInnoAsync(AppDefinition app, AppRelease release, PackageDefinition package,
+    private async Task<InstalledApp> InstallExecutableAsync(AppDefinition app, AppRelease release, PackageDefinition package,
         string installerPath, IProgress<InstallProgress>? progress, CancellationToken cancellationToken)
     {
         var directory = GetInstallDirectory(app, package, null);
@@ -203,21 +203,17 @@ public sealed class InstallationService : IInstallationService
         Directory.CreateDirectory(directory);
         var existing = new InstalledApp(app.Id, ReadProductVersion(executable) ?? "", executable, directory, package.Kind, DateTimeOffset.UtcNow);
         if (File.Exists(executable) && IsRunning(existing))
-            throw new InvalidOperationException("모아뷰가 실행 중이므로 파일을 교체하지 않았습니다. 앱을 닫은 뒤 다시 시도하세요.");
+            throw new InvalidOperationException("프로그램이 실행 중이므로 파일을 교체하지 않았습니다. 앱을 닫은 뒤 다시 시도하세요.");
 
         progress?.Report(new InstallProgress("설치 프로그램 실행"));
-        var start = new ProcessStartInfo
-        {
-            FileName = installerPath,
-            WorkingDirectory = Path.GetDirectoryName(installerPath)!,
-            UseShellExecute = false
-        };
-        foreach (var argument in new[] { "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS", "/SP-", $"/DIR={directory}" })
-            start.ArgumentList.Add(argument);
+        var start = CreateInstallerStartInfo(package.Kind, installerPath, directory);
+        cancellationToken.ThrowIfCancellationRequested();
         using var process = Process.Start(start) ?? throw new InvalidOperationException("설치 프로그램을 시작하지 못했습니다.");
-        progress?.Report(new InstallProgress("설치 중 · 설치 프로그램 창에서 취소할 수 있습니다"));
+        progress?.Report(new InstallProgress(package.Kind.Equals("nsis", StringComparison.OrdinalIgnoreCase)
+            ? "설치 중 · 완료될 때까지 기다려 주세요"
+            : "설치 중 · 설치 프로그램 창에서 취소할 수 있습니다"));
         await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-        if (process.ExitCode is not (0 or 3010))
+        if (process.ExitCode != 0 && !(package.Kind.Equals("inno", StringComparison.OrdinalIgnoreCase) && process.ExitCode == 3010))
             throw new InvalidOperationException($"설치 프로그램이 오류 코드 {process.ExitCode}(으)로 종료되었습니다. 설치 프로그램이 변경한 파일은 자동으로 되돌릴 수 없습니다.");
         if (!File.Exists(executable)) throw new InvalidDataException("설치 후 실행 파일을 찾을 수 없습니다. 설치 프로그램이 변경한 파일은 자동으로 되돌릴 수 없습니다.");
         var actualVersion = ReadProductVersion(executable);
@@ -237,6 +233,34 @@ public sealed class InstallationService : IInstallationService
         progress?.Report(new InstallProgress("설치 완료", 1, 1));
         return installed;
     }
+
+    internal static ProcessStartInfo CreateInstallerStartInfo(string kind, string installerPath, string directory)
+    {
+        var start = new ProcessStartInfo
+        {
+            FileName = installerPath,
+            WorkingDirectory = Path.GetDirectoryName(installerPath)!,
+            UseShellExecute = false
+        };
+        if (kind.Equals("nsis", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!Path.IsPathFullyQualified(directory) || directory.Any(c => c == '"' || char.IsControl(c)))
+                throw new InvalidDataException("NSIS 설치 폴더 경로가 올바르지 않습니다.");
+            // NSIS requires /D to be last and unquoted, including paths with spaces.
+            // ArgumentList would quote this value and break NSIS directory parsing.
+            start.Arguments = $"/S /D={directory}";
+        }
+        else if (kind.Equals("inno", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var argument in new[] { "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS", "/SP-", $"/DIR={directory}" })
+                start.ArgumentList.Add(argument);
+        }
+        else throw new NotSupportedException($"지원하지 않는 설치 패키지입니다: {kind}");
+        return start;
+    }
+
+    private static bool IsExecutableInstaller(PackageDefinition package) =>
+        package.Kind.Equals("inno", StringComparison.OrdinalIgnoreCase) || package.Kind.Equals("nsis", StringComparison.OrdinalIgnoreCase);
 
     private static async Task ExtractZipSafelyAsync(string archivePath, string stage, IProgress<InstallProgress>? progress, CancellationToken cancellationToken)
     {
@@ -365,9 +389,9 @@ public sealed class InstallationService : IInstallationService
 
     private string GetInstallDirectory(AppDefinition app, PackageDefinition package, string? version)
     {
-        if (package.Kind.Equals("inno", StringComparison.OrdinalIgnoreCase))
+        if (IsExecutableInstaller(package))
         {
-            if (string.IsNullOrWhiteSpace(package.InstallDirectory)) throw new InvalidDataException("Inno Setup 패키지에 설치 폴더가 지정되지 않았습니다.");
+            if (string.IsNullOrWhiteSpace(package.InstallDirectory)) throw new InvalidDataException("설치 패키지에 설치 폴더가 지정되지 않았습니다.");
             return SafePaths.ResolveRelative(_localAppData, package.InstallDirectory);
         }
         if (version is null)

@@ -93,6 +93,21 @@ internal sealed class GitHubSettingsChecks : IDisposable
             _ = editor.Dispatcher.BeginInvoke(new Action(() => Invoke(editor, "Save_Click", editor, new RoutedEventArgs())));
             Require(editor.ShowDialog() == true && editor.Result?.IsPrivate == true,
                 "Saving a private app in the editor lost its personal-only classification.");
+            var nsisDefinition = definition with
+            {
+                Packages = [definition.Packages[0] with
+                {
+                    Kind = "nsis", AssetPattern = "private-tool_*-setup.exe", InstallDirectory = "Programs/Private Tool"
+                }]
+            };
+            var nsisEditor = new AppEditorWindow(nsisDefinition) { Owner = window };
+            Require(((ComboBoxItem)Field<System.Windows.Controls.ComboBox>(nsisEditor, "KindInput").SelectedItem).Tag?.ToString() == "nsis" &&
+                    Field<StackPanel>(nsisEditor, "InstallDirectoryPanel").Visibility == Visibility.Visible,
+                "Editing NSIS lost the installer selection or hid its installation directory.");
+            _ = nsisEditor.Dispatcher.BeginInvoke(new Action(() => Invoke(nsisEditor, "Save_Click", nsisEditor, new RoutedEventArgs())));
+            Require(nsisEditor.ShowDialog() == true && nsisEditor.Result?.IsPrivate == true &&
+                    nsisEditor.Result.Packages[0].Kind == "nsis" && nsisEditor.Result.Packages[0].InstallDirectory == "Programs/Private Tool",
+                "Saving NSIS lost its installer format, directory, or personal-only classification.");
             foreach (var path in Directory.EnumerateFiles(dataDirectory, "*", SearchOption.AllDirectories)
                          .Where(path => path.EndsWith(".json", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".log", StringComparison.OrdinalIgnoreCase)))
             {

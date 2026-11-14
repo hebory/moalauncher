@@ -69,12 +69,12 @@ public static class CatalogService
                 if (package is null) throw new InvalidDataException($"앱 패키지 항목이 비어 있습니다: {app.Id}");
                 if (package.Architecture is not ("x64" or "x86" or "arm64")) throw new InvalidDataException($"지원하지 않는 프로세서 형식입니다: {app.Id}");
                 if (!architectures.Add(package.Architecture)) throw new InvalidDataException($"중복된 프로세서 패키지입니다: {app.Id}");
-                if (package.Kind is not ("zip" or "inno")) throw new InvalidDataException($"지원하지 않는 설치 방식입니다: {app.Id}");
+                if (package.Kind is not ("zip" or "inno" or "nsis")) throw new InvalidDataException($"지원하지 않는 설치 방식입니다: {app.Id}");
                 if (string.IsNullOrEmpty(package.AssetPattern) || package.AssetPattern.Length > 160 || package.AssetPattern.IndexOfAny(['/', '\\', ':']) >= 0 || package.AssetPattern.Contains("..", StringComparison.Ordinal))
                     throw new InvalidDataException($"릴리스 파일 패턴이 올바르지 않습니다: {app.Id}");
                 if (!IsRelativePath(package.ExecutablePath) || !string.Equals(Path.GetExtension(package.ExecutablePath), ".exe", StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException($"실행 파일 경로가 올바르지 않습니다: {app.Id}");
-                if (package.Kind == "inno" && !IsRelativePath(package.InstallDirectory)) throw new InvalidDataException($"설치 폴더 경로가 올바르지 않습니다: {app.Id}");
+                if (package.Kind is "inno" or "nsis" && !IsRelativePath(package.InstallDirectory)) throw new InvalidDataException($"설치 폴더 경로가 올바르지 않습니다: {app.Id}");
                 if (package.Kind == "zip" && package.InstallDirectory is not null) throw new InvalidDataException($"압축 패키지에는 설치 폴더를 지정할 수 없습니다: {app.Id}");
                 var expectedExtension = package.Kind == "zip" ? ".zip" : ".exe";
                 if (!string.Equals(Path.GetExtension(package.AssetPattern), expectedExtension, StringComparison.OrdinalIgnoreCase))
