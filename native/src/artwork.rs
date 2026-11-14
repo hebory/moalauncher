@@ -1,6 +1,6 @@
 use crate::{credentials, models::AppDefinition, storage::Paths};
 use base64::Engine;
-use reqwest::{header, Client, StatusCode};
+use reqwest::{Client, StatusCode, header};
 use sha2::{Digest, Sha256};
 use std::{fs, io::Cursor, path::PathBuf};
 use uuid::Uuid;
@@ -168,12 +168,13 @@ fn decode_segment(raw: &str) -> String {
     let mut out = Vec::new();
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() {
-            if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
-                out.push(h * 16 + l);
-                i += 3;
-                continue;
-            }
+        if b[i] == b'%'
+            && i + 2 < b.len()
+            && let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2]))
+        {
+            out.push(h * 16 + l);
+            i += 3;
+            continue;
         }
         out.push(b[i]);
         i += 1;
@@ -310,16 +311,20 @@ mod tests {
             is_private: true,
             packages: Vec::new(),
         };
-        assert!(artwork_uri(
-            &app,
-            "https://raw.githubusercontent.com/example-owner/private-tool/main/icon.png"
-        )
-        .is_some());
-        assert!(artwork_uri(
-            &app,
-            "https://raw.githubusercontent.com/hebory/other/main/icon.png"
-        )
-        .is_none());
+        assert!(
+            artwork_uri(
+                &app,
+                "https://raw.githubusercontent.com/example-owner/private-tool/main/icon.png"
+            )
+            .is_some()
+        );
+        assert!(
+            artwork_uri(
+                &app,
+                "https://raw.githubusercontent.com/hebory/other/main/icon.png"
+            )
+            .is_none()
+        );
         assert!(artwork_uri(
             &app,
             "https://raw.githubusercontent.com/example-owner/private-tool/main%2f..%2fsecret/icon.png"

@@ -4,9 +4,9 @@ use std::{
     mem::{size_of, zeroed},
     ptr::{null, null_mut},
     sync::{
+        Arc,
         atomic::{AtomicIsize, Ordering},
         mpsc::{self, Receiver, Sender, SyncSender, TryRecvError},
-        Arc,
     },
     thread::{self, JoinHandle},
 };
@@ -16,18 +16,17 @@ use windows_sys::Win32::{
     System::LibraryLoader::GetModuleHandleW,
     UI::{
         Shell::{
-            Shell_NotifyIconW, NOTIFYICONDATAW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP,
-            NIIF_INFO, NIM_ADD, NIM_DELETE, NIM_MODIFY,
+            NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIM_ADD, NIM_DELETE, NIM_MODIFY,
+            NOTIFYICONDATAW, Shell_NotifyIconW,
         },
         WindowsAndMessaging::{
             AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-            DispatchMessageW, GetCursorPos, GetWindowLongPtrW, LoadImageW,
-            PeekMessageW, PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW,
-            MsgWaitForMultipleObjects, SetForegroundWindow, SetWindowLongPtrW, TrackPopupMenu,
-            TranslateMessage, WNDCLASSW,
-            IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED, MF_SEPARATOR, MF_STRING, MF_GRAYED,
-            PM_REMOVE, TPM_RETURNCMD, WM_APP, WM_DESTROY, WM_NCCREATE, WM_NULL, WM_RBUTTONUP,
-            GWLP_USERDATA, MSG, QS_ALLINPUT, WS_EX_TOOLWINDOW,
+            DispatchMessageW, GWLP_USERDATA, GetCursorPos, GetWindowLongPtrW, IMAGE_ICON,
+            LR_DEFAULTSIZE, LR_SHARED, LoadImageW, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG,
+            MsgWaitForMultipleObjects, PM_REMOVE, PeekMessageW, PostMessageW, PostQuitMessage,
+            QS_ALLINPUT, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow,
+            SetWindowLongPtrW, TPM_RETURNCMD, TrackPopupMenu, TranslateMessage, WM_APP, WM_DESTROY,
+            WM_NCCREATE, WM_NULL, WM_RBUTTONUP, WNDCLASSW, WS_EX_TOOLWINDOW,
         },
     },
 };
@@ -40,9 +39,9 @@ const MENU_UPDATE_ALL: usize = 1002;
 const MENU_QUIT: usize = 1003;
 
 const WINDOW_CLASS: [u16; 19] = [
-    'M' as u16, 'o' as u16, 'a' as u16, 'L' as u16, 'a' as u16, 'u' as u16, 'n' as u16,
-    'c' as u16, 'h' as u16, 'e' as u16, 'r' as u16, 'T' as u16, 'r' as u16, 'a' as u16,
-    'y' as u16, 'W' as u16, 'i' as u16, 'n' as u16, 0,
+    'M' as u16, 'o' as u16, 'a' as u16, 'L' as u16, 'a' as u16, 'u' as u16, 'n' as u16, 'c' as u16,
+    'h' as u16, 'e' as u16, 'r' as u16, 'T' as u16, 'r' as u16, 'a' as u16, 'y' as u16, 'W' as u16,
+    'i' as u16, 'n' as u16, 0,
 ];
 
 #[derive(Debug)]
@@ -181,7 +180,9 @@ fn worker_main(
         lpszClassName: class_name,
     };
     let registered = unsafe { RegisterClassW(&class) };
-    if registered == 0 && unsafe { GetLastError() } != 1410 /* class already exists */ {
+    if registered == 0 && unsafe { GetLastError() } != 1410
+    /* class already exists */
+    {
         let _ = ready.send(Err("트레이 창 클래스를 등록하지 못했습니다.".into()));
         return;
     }
@@ -221,10 +222,11 @@ fn worker_main(
     state.hwnd = hwnd;
     shared_hwnd.store(hwnd as isize, Ordering::Release);
 
-    let icon = unsafe {
+    let icon: windows_sys::Win32::UI::WindowsAndMessaging::HICON = unsafe {
         LoadImageW(
             instance,
-            1usize as *const u16,
+            // MAKEINTRESOURCEW(1): this is a resource ordinal, never dereferenced.
+            std::ptr::without_provenance::<u16>(1),
             IMAGE_ICON,
             0,
             0,
@@ -233,7 +235,9 @@ fn worker_main(
     } as _;
     if icon.is_null() {
         unsafe { windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(hwnd) };
-        let _ = ready.send(Err("런처 트레이 아이콘 리소스를 불러오지 못했습니다.".into()));
+        let _ = ready.send(Err(
+            "런처 트레이 아이콘 리소스를 불러오지 못했습니다.".into()
+        ));
         return;
     }
     state.icon = icon;
@@ -247,15 +251,7 @@ fn worker_main(
     let mut message: MSG = unsafe { zeroed() };
     let handle = event_handle as windows_sys::Win32::Foundation::HANDLE;
     loop {
-        let result = unsafe {
-            MsgWaitForMultipleObjects(
-                1,
-                &handle,
-                0,
-                u32::MAX,
-                QS_ALLINPUT,
-            )
-        };
+        let result = unsafe { MsgWaitForMultipleObjects(1, &handle, 0, u32::MAX, QS_ALLINPUT) };
         if result == WAIT_OBJECT_0 {
             emit(&state, NativeEvent::Open);
         } else if result == WAIT_OBJECT_0 + 1 {
@@ -309,10 +305,10 @@ unsafe extern "system" fn window_proc(
                 WM_RBUTTONUP | windows_sys::Win32::UI::WindowsAndMessaging::WM_CONTEXTMENU => {
                     show_menu(state)
                 }
-                windows_sys::Win32::UI::Shell::NIN_BALLOONUSERCLICK => {
-                    if !state.announced_ids.is_empty() {
-                        emit(state, NativeEvent::ShowUpdates(state.announced_ids.clone()));
-                    }
+                windows_sys::Win32::UI::Shell::NIN_BALLOONUSERCLICK
+                    if !state.announced_ids.is_empty() =>
+                {
+                    emit(state, NativeEvent::ShowUpdates(state.announced_ids.clone()));
                 }
                 _ => {}
             }
@@ -417,17 +413,8 @@ fn show_menu(state: &WindowState) {
         GetCursorPos(&mut point);
         SetForegroundWindow(state.hwnd);
     }
-    let selected = unsafe {
-        TrackPopupMenu(
-            menu,
-            TPM_RETURNCMD,
-            point.x,
-            point.y,
-            0,
-            state.hwnd,
-            null(),
-        )
-    };
+    let selected =
+        unsafe { TrackPopupMenu(menu, TPM_RETURNCMD, point.x, point.y, 0, state.hwnd, null()) };
     unsafe {
         PostMessageW(state.hwnd, WM_NULL, 0, 0);
         DestroyMenu(menu);
@@ -442,7 +429,11 @@ fn show_menu(state: &WindowState) {
 
 fn fixed_wide<const N: usize>(value: &str) -> [u16; N] {
     let mut output = [0; N];
-    for (target, source) in output.iter_mut().take(N.saturating_sub(1)).zip(value.encode_utf16()) {
+    for (target, source) in output
+        .iter_mut()
+        .take(N.saturating_sub(1))
+        .zip(value.encode_utf16())
+    {
         if source == 0 {
             break;
         }

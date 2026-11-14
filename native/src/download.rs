@@ -1,7 +1,7 @@
 //! Bounded, redirect-checked GitHub release downloads shared by installers.
 use crate::github;
 use crate::models::{InstallProgress, ReleaseAsset};
-use reqwest::{header, StatusCode, Url};
+use reqwest::{StatusCode, Url, header};
 use sha2::{Digest, Sha256};
 use std::{
     future::Future,

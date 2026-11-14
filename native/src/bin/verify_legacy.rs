@@ -102,7 +102,8 @@ fn run() -> Result<(), String> {
     if !report.source_hashes_unchanged {
         return Err("검증 중 원본 파일의 해시가 변경되었습니다. 결과 파일을 확인하세요.".into());
     }
-    println!("호환성 검증 완료: 모드={}, 설정={}, 카탈로그={}, 설치 상태={}/{}, 자격 증명 읽기={}, 원본 변경 없음={}",
+    println!(
+        "호환성 검증 완료: 모드={}, 설정={}, 카탈로그={}, 설치 상태={}/{}, 자격 증명 읽기={}, 원본 변경 없음={}",
         report.mode,
         report.settings_readable,
         report.catalog_readable,

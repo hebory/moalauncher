@@ -9,3 +9,4 @@ TestResults/
 node_modules/
 dist/
 native/target/
+native/gen/

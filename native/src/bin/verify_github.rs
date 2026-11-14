@@ -1,4 +1,4 @@
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use moalauncher_lib::{
     artwork, github,
     models::AppDefinition,
@@ -48,32 +48,30 @@ async fn run_smoke() -> Report {
     let public_paths = Paths::new(Some(isolated_root.clone()));
 
     // Public release and artwork calls use an isolated cache directory to leave profile data untouched.
-    if let Ok(catalog) = storage::load_catalog(&profile_paths) {
-        if let Some(app) = catalog
+    if let Ok(catalog) = storage::load_catalog(&profile_paths)
+        && let Some(app) = catalog
             .apps
             .iter()
             .find(|app| app.repository.eq_ignore_ascii_case("hebory/moaview") && !app.is_private)
-        {
-            report.public_release_available =
-                github::latest(&client, &public_paths, app).await.is_ok();
-            report.public_icon_bytes =
-                artwork_bytes(&client, &public_paths, app, app.icon_url.as_deref()).await;
-            report.public_cover_bytes =
-                artwork_bytes(&client, &public_paths, app, app.cover_url.as_deref()).await;
-        }
+    {
+        report.public_release_available = github::latest(&client, &public_paths, app).await.is_ok();
+        report.public_icon_bytes =
+            artwork_bytes(&client, &public_paths, app, app.icon_url.as_deref()).await;
+        report.public_cover_bytes =
+            artwork_bytes(&client, &public_paths, app, app.cover_url.as_deref()).await;
     }
 
     // Private app selection is data-driven. The stored credential is only read by the existing API modules.
-    if let Ok(catalog) = storage::load_personal_catalog(&profile_paths) {
-        if let Some(app) = catalog.apps.iter().find(|app| app.is_private) {
-            report.private_app_configured = true;
-            report.private_release_available =
-                github::latest(&client, &profile_paths, app).await.is_ok();
-            report.private_icon_bytes =
-                artwork_bytes(&client, &profile_paths, app, app.icon_url.as_deref()).await;
-            report.private_cover_bytes =
-                artwork_bytes(&client, &profile_paths, app, app.cover_url.as_deref()).await;
-        }
+    if let Ok(catalog) = storage::load_personal_catalog(&profile_paths)
+        && let Some(app) = catalog.apps.iter().find(|app| app.is_private)
+    {
+        report.private_app_configured = true;
+        report.private_release_available =
+            github::latest(&client, &profile_paths, app).await.is_ok();
+        report.private_icon_bytes =
+            artwork_bytes(&client, &profile_paths, app, app.icon_url.as_deref()).await;
+        report.private_cover_bytes =
+            artwork_bytes(&client, &profile_paths, app, app.cover_url.as_deref()).await;
     }
 
     let _ = fs::remove_dir_all(isolated_root);

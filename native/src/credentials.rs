@@ -1,4 +1,4 @@
-use crate::storage::{normalize_path, Paths};
+use crate::storage::{Paths, normalize_path};
 use sha2::{Digest, Sha256};
 
 const TARGET_PREFIX: &str = "MoaLauncher/GitHub/";
@@ -69,8 +69,8 @@ mod windows_impl {
     use windows_sys::Win32::{
         Foundation::GetLastError,
         Security::Credentials::{
-            CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE,
-            CRED_TYPE_GENERIC,
+            CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC, CREDENTIALW, CredDeleteW, CredFree,
+            CredReadW, CredWriteW,
         },
     };
 

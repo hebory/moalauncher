@@ -1,6 +1,6 @@
 //! Release selection, safe staging and application installation.
 
-use crate::download::{checksum_matches, download_asset, MAX_PACKAGE_BYTES};
+use crate::download::{MAX_PACKAGE_BYTES, checksum_matches, download_asset};
 use crate::{
     models::{
         AppDefinition, AppRelease, InstallProgress, InstalledApp, PackageDefinition, ReleaseAsset,
@@ -13,8 +13,8 @@ use std::{
     path::{Component, Path, PathBuf},
     process::Command,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 use sysinfo::{ProcessesToUpdate, System};
@@ -408,10 +408,10 @@ async fn expected_sha256(
     cancel: &AtomicBool,
     cb: &(dyn Fn(InstallProgress) + Send + Sync),
 ) -> Result<String, String> {
-    if let Some(hash) = &asset.sha256 {
-        if sha_valid(hash) {
-            return Ok(hash.to_ascii_lowercase());
-        }
+    if let Some(hash) = &asset.sha256
+        && sha_valid(hash)
+    {
+        return Ok(hash.to_ascii_lowercase());
     }
     let checksum = release
         .assets
@@ -786,16 +786,16 @@ fn reject_reparse_path(path: &Path) -> Result<(), String> {
     let mut current = PathBuf::new();
     for component in full.components() {
         current.push(component);
-        if let Ok(meta) = fs::symlink_metadata(&current) {
-            if meta.file_type().is_symlink() {
-                return Err("경로에 링크 또는 재분석 지점이 있습니다.".into());
-            }
+        if let Ok(meta) = fs::symlink_metadata(&current)
+            && meta.file_type().is_symlink()
+        {
+            return Err("경로에 링크 또는 재분석 지점이 있습니다.".into());
         }
         #[cfg(windows)]
         {
             use std::os::windows::ffi::OsStrExt;
             use windows_sys::Win32::Storage::FileSystem::{
-                GetFileAttributesW, FILE_ATTRIBUTE_REPARSE_POINT, INVALID_FILE_ATTRIBUTES,
+                FILE_ATTRIBUTE_REPARSE_POINT, GetFileAttributesW, INVALID_FILE_ATTRIBUTES,
             };
             let wide: Vec<u16> = current.as_os_str().encode_wide().chain(Some(0)).collect();
             let attrs = unsafe { GetFileAttributesW(wide.as_ptr()) };

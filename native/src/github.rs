@@ -3,7 +3,7 @@ use crate::{
     models::{AppDefinition, AppRelease, Catalog, ReleaseAsset, ReleaseResult},
     storage::Paths,
 };
-use reqwest::{header, redirect::Policy, Client, StatusCode};
+use reqwest::{Client, StatusCode, header, redirect::Policy};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf, time::Duration};
@@ -43,10 +43,10 @@ pub async fn latest(
             .ok_or_else(|| "비공개 저장소를 확인하려면 GitHub 인증을 설정하세요.".to_string())?;
         validate_token_text(&token)?;
         req = req.bearer_auth(token);
-    } else if let Some(cached) = &cached {
-        if let Some(etag) = cached.etag.as_deref() {
-            req = req.header(header::IF_NONE_MATCH, etag);
-        }
+    } else if let Some(cached) = &cached
+        && let Some(etag) = cached.etag.as_deref()
+    {
+        req = req.header(header::IF_NONE_MATCH, etag);
     }
     let response = req.send().await.map_err(|_| if app.is_private { "비공개 GitHub 릴리스 정보를 안전하게 가져오지 못했습니다. 네트워크 연결과 저장소 권한을 확인하세요." } else { "GitHub 릴리스 정보를 가져오지 못했습니다." }.to_string());
     let response = match response {
@@ -306,12 +306,13 @@ fn decode_path_segment(raw: &str) -> String {
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() {
-            if let (Some(h), Some(l)) = (hex_digit(b[i + 1]), hex_digit(b[i + 2])) {
-                out.push(h * 16 + l);
-                i += 3;
-                continue;
-            }
+        if b[i] == b'%'
+            && i + 2 < b.len()
+            && let (Some(h), Some(l)) = (hex_digit(b[i + 1]), hex_digit(b[i + 2]))
+        {
+            out.push(h * 16 + l);
+            i += 3;
+            continue;
         }
         out.push(b[i]);
         i += 1;
@@ -624,38 +625,48 @@ mod tests {
             parsed.assets[0].sha256.as_deref(),
             Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         );
-        assert!(parse_release(
-            &release_payload("v1.2.4-beta.1", false, false, asset, None),
-            "hebory/moaview",
-            false
-        )
-        .is_err());
-        assert!(parse_release(
-            &release_payload("v1.2.3", false, true, asset, None),
-            "hebory/moaview",
-            false
-        )
-        .is_err());
-        assert!(parse_release(
-            &release_payload("v1.2.3", true, false, asset, None),
-            "hebory/moaview",
-            false
-        )
-        .is_err());
+        assert!(
+            parse_release(
+                &release_payload("v1.2.4-beta.1", false, false, asset, None),
+                "hebory/moaview",
+                false
+            )
+            .is_err()
+        );
+        assert!(
+            parse_release(
+                &release_payload("v1.2.3", false, true, asset, None),
+                "hebory/moaview",
+                false
+            )
+            .is_err()
+        );
+        assert!(
+            parse_release(
+                &release_payload("v1.2.3", true, false, asset, None),
+                "hebory/moaview",
+                false
+            )
+            .is_err()
+        );
         let wrong_repo =
             "https://github.com/elsewhere/moaview/releases/download/v1.2.3/MoaView.zip";
-        assert!(parse_release(
-            &release_payload("v1.2.3", false, false, wrong_repo, None),
-            "hebory/moaview",
-            false
-        )
-        .is_err());
-        assert!(parse_release(
-            &release_payload("v1.2.3", false, false, asset, Some("sha256:not-a-digest")),
-            "hebory/moaview",
-            false
-        )
-        .is_err());
+        assert!(
+            parse_release(
+                &release_payload("v1.2.3", false, false, wrong_repo, None),
+                "hebory/moaview",
+                false
+            )
+            .is_err()
+        );
+        assert!(
+            parse_release(
+                &release_payload("v1.2.3", false, false, asset, Some("sha256:not-a-digest")),
+                "hebory/moaview",
+                false
+            )
+            .is_err()
+        );
     }
 
     #[test]

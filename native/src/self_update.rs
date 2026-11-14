@@ -1,6 +1,6 @@
 //! Isolated helper handoff for installing the launcher's official Inno package.
 use crate::{
-    download::{download_asset, MAX_PACKAGE_BYTES},
+    download::{MAX_PACKAGE_BYTES, download_asset},
     install::{normalize_version, read_product_version, wildcard_match},
     models::{AppRelease, InstallProgress},
     storage::Paths,
@@ -12,8 +12,8 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     thread,
     time::Duration,
@@ -571,16 +571,16 @@ fn reject_reparse(p: &Path) -> Result<(), String> {
             return Err("경로에 상위 폴더 이동이 포함되어 있습니다.".into());
         }
         cur.push(c);
-        if let Ok(m) = fs::symlink_metadata(&cur) {
-            if m.file_type().is_symlink() {
-                return Err("자체 업데이트 경로에 링크가 포함되어 있습니다.".into());
-            }
+        if let Ok(m) = fs::symlink_metadata(&cur)
+            && m.file_type().is_symlink()
+        {
+            return Err("자체 업데이트 경로에 링크가 포함되어 있습니다.".into());
         }
         #[cfg(windows)]
         {
             use std::os::windows::ffi::OsStrExt;
             use windows_sys::Win32::Storage::FileSystem::{
-                GetFileAttributesW, FILE_ATTRIBUTE_REPARSE_POINT, INVALID_FILE_ATTRIBUTES,
+                FILE_ATTRIBUTE_REPARSE_POINT, GetFileAttributesW, INVALID_FILE_ATTRIBUTES,
             };
             let wide: Vec<u16> = cur.as_os_str().encode_wide().chain(Some(0)).collect();
             let attrs = unsafe { GetFileAttributesW(wide.as_ptr()) };

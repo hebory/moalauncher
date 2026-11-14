@@ -1,5 +1,5 @@
 use crate::models::{Catalog, InstalledApp, Settings};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -501,7 +501,7 @@ fn write_atomic_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
 fn replace_file(source: &Path, target: &Path) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
     };
     let source: Vec<u16> = source
         .as_os_str()
@@ -617,10 +617,11 @@ mod tests {
         assert_eq!(s.check_interval_minutes, 180);
         s.use_grid_view = false;
         save_settings(&p, &s).unwrap();
-        assert!(p
-            .data_dir
-            .join("migration-backup/tauri-v1/settings.json")
-            .exists());
+        assert!(
+            p.data_dir
+                .join("migration-backup/tauri-v1/settings.json")
+                .exists()
+        );
         let v: serde_json::Value =
             serde_json::from_slice(&fs::read(p.data_dir.join(SETTINGS_FILE)).unwrap()).unwrap();
         assert_eq!(v["futureOption"]["x"], 1);

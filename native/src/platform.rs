@@ -1,4 +1,4 @@
-use crate::storage::{normalize_path, Paths};
+use crate::storage::{Paths, normalize_path};
 use sha2::{Digest, Sha256};
 use std::{path::Path, process::Command};
 
@@ -33,7 +33,7 @@ pub fn startup_command(exe: &Path, data: &Path) -> Result<String, String> {
 }
 
 pub fn startup_enabled(paths: &Paths) -> bool {
-    use winreg::{enums::HKEY_CURRENT_USER, RegKey};
+    use winreg::{RegKey, enums::HKEY_CURRENT_USER};
     let Ok(exe) = std::env::current_exe() else {
         return false;
     };
@@ -47,7 +47,7 @@ pub fn startup_enabled(paths: &Paths) -> bool {
 }
 
 pub fn set_startup(paths: &Paths, enabled: bool) -> Result<(), String> {
-    use winreg::{enums::HKEY_CURRENT_USER, RegKey};
+    use winreg::{RegKey, enums::HKEY_CURRENT_USER};
     let command = startup_command(
         &std::env::current_exe().map_err(|_| "실행 경로를 확인하지 못했습니다.")?,
         &paths.data_dir,
@@ -100,7 +100,7 @@ pub struct InstanceGuard {
 impl InstanceGuard {
     pub fn acquire(paths: &Paths, activate: bool) -> Result<Option<Self>, String> {
         use windows_sys::Win32::{
-            Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS},
+            Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError},
             System::Threading::{CreateEventW, CreateMutexW, SetEvent},
         };
         let identity =
@@ -161,8 +161,11 @@ mod tests {
             Path::new("C:\\Users\\사용자\\Data\\"),
         )
         .unwrap();
-        assert!(command
-            .starts_with("\"C:\\Program Files\\Moa\\MoaLauncher.exe\" --background --data-dir "));
+        assert!(
+            command.starts_with(
+                "\"C:\\Program Files\\Moa\\MoaLauncher.exe\" --background --data-dir "
+            )
+        );
         assert!(command.ends_with("Data\\\\\""));
         assert!(startup_command(Path::new("relative.exe"), Path::new("C:\\Data")).is_err());
     }
