@@ -3,14 +3,14 @@ use crate::{
     library::{self, Filter},
     models::{AppDefinition, Catalog, PackageDefinition},
     platform::InstanceGuard,
-    storage::Paths,
+    runtime::Session,
     windows::{NativeEvent, Tray},
 };
 use base64::Engine;
 use eframe::egui::{self, Align, Color32, FontId, RichText, TextureHandle, Vec2};
 use std::{
     collections::HashMap,
-    sync::{Arc, mpsc::Receiver},
+    sync::{Arc, Mutex, mpsc::Receiver},
 };
 
 const PURPLE: Color32 = Color32::from_rgb(102, 89, 224);
@@ -38,6 +38,7 @@ pub struct NativeApp {
     _guard: InstanceGuard,
     engine: SharedEngine,
     _runtime: Arc<tokio::runtime::Runtime>,
+    wake_context: Arc<Mutex<Option<egui::Context>>>,
     native_events: Receiver<NativeEvent>,
     snapshot: Snapshot,
     artwork: HashMap<String, Artwork>,
@@ -59,19 +60,20 @@ pub struct NativeApp {
 }
 
 impl NativeApp {
-    pub fn new(
-        cc: &eframe::CreationContext<'_>,
-        paths: Paths,
-        runtime: Arc<tokio::runtime::Runtime>,
-        guard: InstanceGuard,
-        background: bool,
-    ) -> Result<Self, String> {
+    pub fn new(cc: &eframe::CreationContext<'_>, session: Session) -> Result<Self, String> {
         configure(&cc.egui_ctx);
-        let context = cc.egui_ctx.clone();
-        let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || context.request_repaint());
-        let engine = SharedEngine::new(paths, runtime.handle().clone(), wake.clone())?;
-        engine.set_background(background);
-        let (tray, native_events) = Tray::new(guard.event_handle(), wake)?;
+        let Session {
+            tray,
+            guard,
+            engine,
+            runtime,
+            native_events,
+            wake_context,
+            notified,
+            error,
+            ..
+        } = session;
+        *wake_context.lock().unwrap() = Some(cc.egui_ctx.clone());
         let snapshot = engine.snapshot();
         let launcher_icon = texture(
             &cc.egui_ctx,
@@ -83,12 +85,17 @@ impl NativeApp {
             "launcher-cover",
             include_bytes!("../../cover.png"),
         )?;
-        engine.start();
+        let filter = if notified.is_empty() {
+            Filter::All
+        } else {
+            Filter::Updates
+        };
         Ok(Self {
             tray,
             _guard: guard,
             engine,
             _runtime: runtime,
+            wake_context,
             native_events,
             snapshot,
             artwork: HashMap::new(),
@@ -96,15 +103,15 @@ impl NativeApp {
             launcher_icon,
             launcher_cover,
             page: Page::Library,
-            filter: Filter::All,
+            filter,
             query: String::new(),
             selected: None,
             editor: None,
             imported: None,
-            notified: vec![],
+            notified,
             password: String::new(),
-            error: String::new(),
-            visible: !background,
+            error,
+            visible: true,
             quitting: false,
             catalog_pending: false,
         })
@@ -1120,6 +1127,7 @@ impl eframe::App for NativeApp {
         self.dialogs(ui.ctx());
     }
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        *self.wake_context.lock().unwrap() = None;
         let _ = self.engine.request_exit();
     }
 }
