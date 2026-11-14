@@ -15,12 +15,43 @@ public sealed class LauncherSettingsTests
         Assert.False(settings.CheckOnStartup);
         Assert.False(settings.PeriodicChecks);
         Assert.True(settings.UpdateNotifications);
+        Assert.False(settings.UseGridView);
     }
 
     [Fact]
     public void NewSettingsEnableUpdateNotifications()
     {
         Assert.True(new LauncherSettings().UpdateNotifications);
+    }
+
+    [Fact]
+    public void NewSettingsKeepTheListViewByDefault()
+    {
+        Assert.False(new LauncherSettings().UseGridView);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SavedLibraryViewSurvivesRestartWithoutResettingOtherPreferences(bool useGridView)
+    {
+        var original = new LauncherSettings
+        {
+            UseGridView = useGridView,
+            CheckOnStartup = false,
+            PeriodicChecks = false,
+            UpdateNotifications = false,
+            CheckIntervalMinutes = 1440
+        };
+
+        var json = JsonSerializer.Serialize(original, CatalogService.JsonOptions);
+        var restored = JsonSerializer.Deserialize<LauncherSettings>(json, CatalogService.JsonOptions)!;
+
+        Assert.Equal(useGridView, restored.UseGridView);
+        Assert.False(restored.CheckOnStartup);
+        Assert.False(restored.PeriodicChecks);
+        Assert.False(restored.UpdateNotifications);
+        Assert.Equal(1440, restored.CheckIntervalMinutes);
     }
 
     [Theory]

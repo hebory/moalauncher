@@ -181,6 +181,7 @@ internal static class Program
         openMenuItem.PerformClick();
         if (!window.IsVisible) throw new InvalidOperationException("Tray open menu action did not restore the window.");
 
+        await LibraryViewChecks.RunAsync(window, leaveInGridView: startsInBackground);
         await updateChecks.RunAsync(app, window);
         await gitHubChecks.RunAsync(window, dataDirectory);
 

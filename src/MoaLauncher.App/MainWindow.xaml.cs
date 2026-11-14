@@ -90,6 +90,7 @@ public partial class MainWindow : Window
             PeriodicCheck.IsChecked = settings.PeriodicChecks;
             UpdateNotificationCheck.IsChecked = settings.UpdateNotifications;
             CheckIntervalInput.SelectedValue = settings.CheckIntervalMinutes;
+            ApplyViewMode();
             await LoadCatalogAsync();
             ready = true;
             UpdateNotificationCheck.IsEnabled = true;
@@ -405,6 +406,24 @@ public partial class MainWindow : Window
     }
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await CheckAllAsync();
     private void Search_Changed(object sender, TextChangedEventArgs e) { if (ready) ApplyFilter(); }
+    private async void ViewMode_Changed(object sender, RoutedEventArgs e)
+    {
+        var useGrid = ReferenceEquals(sender, GridViewButton);
+        if (!ready || settings.UseGridView == useGrid) return;
+        settings = settings with { UseGridView = useGrid };
+        ApplyViewMode();
+        ProgramScroll.ScrollToTop();
+        await SaveSettingsAsync();
+    }
+
+    private void ApplyViewMode()
+    {
+        ListViewButton.IsChecked = !settings.UseGridView;
+        GridViewButton.IsChecked = settings.UseGridView;
+        AppCards.ItemTemplate = (DataTemplate)FindResource(settings.UseGridView ? "GridAppTemplate" : "ListAppTemplate");
+        AppCards.ItemsPanel = (ItemsPanelTemplate)FindResource(settings.UseGridView ? "GridAppPanel" : "ListAppPanel");
+    }
+
     private void All_Click(object sender, RoutedEventArgs e) { notifiedAppIds = null; ShowLibrary(); PageTitle.Text = "내 프로그램"; filter = "all"; ApplyFilter(); }
     private void Installed_Click(object sender, RoutedEventArgs e) { notifiedAppIds = null; ShowLibrary(); PageTitle.Text = "내 프로그램"; filter = "installed"; ApplyFilter(); }
     private void Library_Click(object sender, RoutedEventArgs e) => All_Click(sender, e);
@@ -562,7 +581,7 @@ public partial class MainWindow : Window
     private async void Setting_Changed(object sender, RoutedEventArgs e)
     {
         if (!ready) return;
-        settings = new LauncherSettings
+        settings = settings with
         {
             CheckOnStartup = StartupCheck.IsChecked == true,
             PeriodicChecks = PeriodicCheck.IsChecked == true,
@@ -571,6 +590,11 @@ public partial class MainWindow : Window
                 ? minutes : LauncherSettings.DefaultCheckIntervalMinutes
         };
         ApplyCheckSchedule();
+        await SaveSettingsAsync();
+    }
+
+    private async Task SaveSettingsAsync()
+    {
         await settingsGate.WaitAsync();
         try
         {

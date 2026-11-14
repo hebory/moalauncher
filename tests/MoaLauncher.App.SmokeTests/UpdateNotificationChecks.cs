@@ -410,7 +410,7 @@ internal sealed partial class UpdateNotificationChecks
         for (var index = 0; index < count; index++)
         {
             var child = VisualTreeHelper.GetChild(root, index);
-            if (child is Button button && button.DataContext is AppItem item && item.Definition.Id == appId)
+            if (child is Button { Name: "AppActionButton" } button && button.DataContext is AppItem item && item.Definition.Id == appId)
                 return button;
             var nested = FindActionButton(child, appId);
             if (nested is not null) return nested;
