@@ -10,7 +10,9 @@
 - 미유지보수 경고: **4건** — `proc-macro-error 1.0.4` (RUSTSEC-2024-0370), `zbus_names 4.3.5` (RUSTSEC-2026-0371), `zvariant 5.15.1` (RUSTSEC-2026-0370), `zvariant_derive 5.15.1` (RUSTSEC-2026-0372)
 - soundness 경고: **1건** — `glib 0.18.5` (RUSTSEC-2024-0429). 이 경고는 `glib::VariantStrIter`의 반복자 메서드에 대한 soundness 문제이며, advisory는 `0.20.0` 이상을 수정 버전으로 표시합니다.
 
-이 감사는 모든 lockfile 항목을 대상으로 하므로 Windows 빌드에서 실제로 포함되는 플랫폼별 의존성인지까지 판정하지 않습니다. `glib` 경고는 Windows 배포 그래프에 포함되는지 별도 확인이 필요합니다. 이번 명령은 crates.io yanked 상태를 건너뛰었으므로 yanked 검사는 이 결과에 포함되지 않습니다. 미유지보수 경고를 취약점 건수에 더하지 않았으며, 패키지를 자동 갱신하거나 advisory를 예외 처리하지 않았습니다.
+`cargo tree --locked --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc -i <crate>`로 `glib`과 미유지보수 경고 4개를 각각 역방향 확인했습니다. 다섯 crate 모두 Windows 대상 그래프에는 없었습니다. `--target all` 그래프에서 `glib`과 `proc-macro-error`는 GTK/WebKit 의존성 아래에, `zbus_names`·`zvariant`·`zvariant_derive`는 `tauri-plugin-notification`의 zbus 그래프 아래에 나타났습니다. 따라서 이 advisory 경고들은 잠금 파일의 다른 플랫폼 의존성에 해당하며 Windows x64 런처 빌드에는 포함되지 않습니다.
+
+감사는 모든 lockfile 항목을 대상으로 했고 crates.io yanked 상태를 건너뛰었으므로 yanked 검사는 이 결과에 포함되지 않습니다. 미유지보수 경고를 취약점 건수에 더하지 않았으며, 패키지를 자동 갱신하거나 advisory를 예외 처리하지 않았습니다.
 
 ## 프로필 연결 확인
 
@@ -20,4 +22,4 @@
 
 ## 테스트 범위
 
-통합 작업에서 백엔드 단위 테스트 31개와 프런트엔드 테스트 4개가 통과했다고 전달받았습니다. 이 보고서 작성 중에는 해당 테스트를 다시 실행하지 않았고 다른 에이전트의 추가 테스트가 진행 중이어서 그 결과는 확인하지 않았습니다. `npm audit --omit=dev`의 취약점 0건도 이전에 전달된 결과이며 이번 검토에서 재실행하지 않았습니다.
+작성 시 전달받은 백엔드 테스트 상태는 30개 통과, 1개 무시이며, 설치 통합 픽스처는 별도로 실행 중입니다. 즐겨찾기 null 처리 테스트 추가 후 최종 결과는 아직 확인하지 않았습니다. 프런트엔드 테스트 4개 통과와 `npm audit --omit=dev` 취약점 0건은 이전에 전달된 결과이며 이번 검토에서 다시 실행하지 않았습니다. 다른 에이전트의 진행 중 테스트 결과도 확인하지 않았습니다.
