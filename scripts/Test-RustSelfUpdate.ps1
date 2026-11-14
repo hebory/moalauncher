@@ -178,11 +178,11 @@ function Save-FixtureProcessOutput([Diagnostics.Process]$Process) {
     $script:fixtureOutputCaptures.Remove($Process.Id) | Out-Null
 }
 
-function Wait-File([string]$Path, [Diagnostics.Process]$Process, [int]$Seconds, [string]$FailureMessage) {
+function Wait-File([string]$Path, [Diagnostics.Process]$Process, [int]$Seconds, [string]$FailureMessage, [switch]$AllowExited) {
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     while ([DateTime]::UtcNow -lt $deadline) {
         if (Test-Path -LiteralPath $Path -PathType Leaf) { return }
-        if ($Process.HasExited) { throw "$FailureMessage (process exit $($Process.ExitCode))." }
+        if ($Process.HasExited -and !$AllowExited) { throw "$FailureMessage (process exit $($Process.ExitCode))." }
         Start-Sleep -Milliseconds 100
     }
     throw "$FailureMessage (timed out)."
@@ -258,7 +258,7 @@ function Invoke-HelperCase([string]$Name, [ValidateSet('SUCCESS', 'FAIL', 'WRONG
         $resultPath = Join-Path $data 'self-update-result.json'
         Wait-File $resultPath $helper 5 'Rust helper did not write its result file'
         $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
-        Wait-File (Join-Path $data 'fake-restart.marker') $helper 15 'Launcher restart marker was not written'
+        Wait-File (Join-Path $data 'fake-restart.marker') $helper 15 'Launcher restart marker was not written' -AllowExited
 
         $userStateAfter = (Get-FileHash -LiteralPath (Join-Path $data 'existing-user-state.json') -Algorithm SHA256).Hash
         $installedStateAfter = (Get-FileHash -LiteralPath (Join-Path $data 'installed-app-state.json') -Algorithm SHA256).Hash

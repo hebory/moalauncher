@@ -101,7 +101,11 @@ pub struct Settings {
     pub update_notifications: bool,
     #[serde(default = "yes", alias = "UseGridView")]
     pub use_grid_view: bool,
-    #[serde(default, alias = "FavoriteAppIds", deserialize_with = "nullable_favorites")]
+    #[serde(
+        default,
+        alias = "FavoriteAppIds",
+        deserialize_with = "nullable_favorites"
+    )]
     pub favorite_app_ids: Vec<String>,
     #[serde(default = "default_interval", alias = "CheckIntervalMinutes")]
     pub check_interval_minutes: u32,
@@ -115,9 +119,15 @@ fn default_interval() -> u32 {
     60
 }
 
-fn nullable_favorites<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
+fn nullable_favorites<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<String>, D::Error> {
     let favorites = Option::<Vec<Option<String>>>::deserialize(deserializer)?;
-    Ok(favorites.unwrap_or_default().into_iter().flatten().collect())
+    Ok(favorites
+        .unwrap_or_default()
+        .into_iter()
+        .flatten()
+        .collect())
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -195,7 +205,8 @@ mod tests {
     fn legacy_null_favorites_remain_readable() {
         let empty: Settings = serde_json::from_str(r#"{"favoriteAppIds":null}"#).unwrap();
         assert!(empty.favorite_app_ids.is_empty());
-        let mixed: Settings = serde_json::from_str(r#"{"FavoriteAppIds":[null,"moaview"]}"#).unwrap();
+        let mixed: Settings =
+            serde_json::from_str(r#"{"FavoriteAppIds":[null,"moaview"]}"#).unwrap();
         assert_eq!(mixed.favorite_app_ids, vec!["moaview"]);
     }
     #[test]

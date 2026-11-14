@@ -711,7 +711,7 @@ fn wait_parent(p: &Plan) -> bool {
 fn copy_tree(src: &Path, dst: &Path) -> Result<Vec<String>, String> {
     let mut files = Vec::new();
     let mut total = 0u64;
-    copy_walk(src, dst, src, &mut files, &mut total)?;
+    copy_walk(src, src, dst, &mut files, &mut total)?;
     if files.len() > MAX_FILES {
         return Err("런처 백업 파일 수가 제한을 넘었습니다.".into());
     }
@@ -762,7 +762,7 @@ fn restore_tree(backup: &Path, target: &Path, manifest: &[String]) -> Result<(),
         if !allowed.contains(&rel) {
             let p = target.join(&rel);
             reject_reparse(&p)?;
-            let _ = fs::remove_file(p);
+            fs::remove_file(p).map_err(|_| "부분 설치 파일을 제거하지 못했습니다.")?;
         }
     }
     for rel in manifest {
@@ -866,6 +866,30 @@ mod tests {
         assert!(validate_installer_hash(&installer, &digest).is_ok());
         assert!(validate_installer_hash(&installer, &"0".repeat(64)).is_err());
         assert!(validate_installer_hash(&installer, "not-a-sha256").is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn backup_restores_original_nested_files_after_partial_installation() {
+        let root = temp_root();
+        let target = root.join("target");
+        let backup = root.join("backup");
+        fs::create_dir_all(target.join("catalog")).unwrap();
+        fs::create_dir_all(&backup).unwrap();
+        fs::write(target.join(EXE), b"original launcher").unwrap();
+        fs::write(target.join("catalog/apps.json"), b"original catalog").unwrap();
+        let files = copy_tree(&target, &backup).unwrap();
+        assert_eq!(files.len(), 2);
+        assert_eq!(fs::read(backup.join(EXE)).unwrap(), b"original launcher");
+        fs::write(target.join(EXE), b"partially replaced launcher").unwrap();
+        fs::write(target.join("new-file.txt"), b"partial installation").unwrap();
+        restore_tree(&backup, &target, &files).unwrap();
+        assert_eq!(fs::read(target.join(EXE)).unwrap(), b"original launcher");
+        assert_eq!(
+            fs::read(target.join("catalog/apps.json")).unwrap(),
+            b"original catalog"
+        );
+        assert!(!target.join("new-file.txt").exists());
         fs::remove_dir_all(root).unwrap();
     }
 

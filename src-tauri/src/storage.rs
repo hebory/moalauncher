@@ -635,7 +635,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn data_path_normalization_matches_dotnet_roots_and_unc_paths() {
-        assert_eq!(normalize_path(Path::new(r"\\?\C:\Users\user\Data")), normalize_path(Path::new(r"C:\Users\user\Data")));
+        assert_eq!(
+            normalize_path(Path::new(r"\\?\C:\Users\user\Data")),
+            normalize_path(Path::new(r"C:\Users\user\Data"))
+        );
         assert_eq!(
             normalize_path(Path::new(r"C:\Users\tester\..\Data\MoaLauncher\")),
             r"C:\USERS\DATA\MOALAUNCHER"

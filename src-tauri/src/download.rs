@@ -305,9 +305,8 @@ pub(super) fn checksum_matches(text: &str, asset_name: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::{
-        credentials,
-        github::{self, ReleaseResult},
-        install,
+        credentials, github, install,
+        models::ReleaseResult,
         models::{AppDefinition, AppRelease},
         storage::{self, Paths},
     };
@@ -504,14 +503,12 @@ mod tests {
     async fn live_public_and_private_assets_verify() {
         let profile = Paths::new(None);
         let catalog = storage::load_catalog(&profile).expect("기본 카탈로그를 읽어야 합니다.");
-        let personal = storage::load_personal_catalog(&profile)
-            .expect("개인 카탈로그를 읽어야 합니다.");
+        let personal =
+            storage::load_personal_catalog(&profile).expect("개인 카탈로그를 읽어야 합니다.");
         let public_app = catalog
             .apps
             .into_iter()
-            .find(|app| {
-                app.repository.eq_ignore_ascii_case("hebory/moaview") && !app.is_private
-            })
+            .find(|app| app.repository.eq_ignore_ascii_case("hebory/moaview") && !app.is_private)
             .expect("공개 모아뷰 항목이 기본 카탈로그에 있어야 합니다.");
         let private_app = personal
             .apps
@@ -561,7 +558,10 @@ mod tests {
         } = github::latest(&client, &profile, &private_app)
             .await
             .expect("비공개 릴리스 정보를 읽어야 합니다.");
-        assert!(!private_cached, "비공개 릴리스 정보를 새로 확인해야 합니다.");
+        assert!(
+            !private_cached,
+            "비공개 릴리스 정보를 새로 확인해야 합니다."
+        );
         let private_bytes = download_verified_release_asset(
             &client,
             &private_app,
