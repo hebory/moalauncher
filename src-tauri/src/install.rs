@@ -545,8 +545,7 @@ async fn extract_zip(
             }
             let dest = stage.join(relative);
             register_zip_path(&mut names, &dest)?;
-            use zip::HasZipMetadata;
-            validate_zip_metadata(entry.size(), entry.compressed_size(), entry.unix_mode().unwrap_or(0), entry.get_metadata().external_attributes)?;
+            validate_zip_metadata(entry.size(), entry.compressed_size(), entry.unix_mode().unwrap_or(0), entry.external_attributes())?;
             if directory {
                 fs::create_dir_all(&dest).map_err(|_| "ZIP 폴더를 만들지 못했습니다.")?;
                 reject_reparse_path(&dest)
@@ -838,7 +837,19 @@ mod tests {
         }
     }
     fn definition(kind: &str) -> AppDefinition {
-        AppDefinition { id: format!("fixture-{kind}"), name: "fixture".into(), packages: vec![package(kind)], ..Default::default() }
+        AppDefinition {
+            id: format!("fixture-{kind}"),
+            name: "fixture".into(),
+            description: String::new(),
+            category: "테스트".into(),
+            accent_color: "#000000".into(),
+            monogram: "F".into(),
+            icon_url: None,
+            cover_url: None,
+            repository: "owner/repo".into(),
+            is_private: false,
+            packages: vec![package(kind)],
+        }
     }
     fn release(tag: &str) -> AppRelease {
         AppRelease { tag: tag.into(), name: tag.into(), notes: String::new(), page_url: String::new(), published_at: String::new(), assets: vec![], is_private: false }

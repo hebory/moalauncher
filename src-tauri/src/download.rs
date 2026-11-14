@@ -295,7 +295,7 @@ mod tests {
     #[test]
     fn checksum_parser_ignores_empty_lines_and_requires_matching_name() {
         let hash = "a".repeat(64);
-        assert_eq!(checksum_matches(&format!("\n{hash} *MoaView.zip\n"), "moaview.ZIP"), Some(hash));
+        assert_eq!(checksum_matches(&format!("\n{hash} *MoaView.zip\n"), "moaview.ZIP"), Some(hash.clone()));
         assert_eq!(checksum_matches(&format!("{hash} other.zip\n"), "moaview.zip"), None);
         assert_eq!(checksum_matches("not-a-checksum", "MoaView.zip"), None);
     }
