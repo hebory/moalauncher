@@ -59,11 +59,15 @@ struct Snapshot {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateResult {
+    #[serde(alias = "Success")]
     success: bool,
+    #[serde(alias = "Message")]
     message: String,
-    #[serde(default)]
+    #[serde(default, alias = "LogPath")]
     log_path: String,
+    #[serde(alias = "Version")]
     version: String,
+    #[serde(alias = "CompletedAt")]
     completed_at: String,
 }
 struct Data {
@@ -1096,6 +1100,13 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_helper_result_remains_visible_after_migration() {
+        let result: UpdateResult = serde_json::from_str(r#"{"Success":true,"Message":"업데이트 완료","LogPath":"install.log","Version":"0.3.0","CompletedAt":"2026-11-15T00:00:00Z"}"#).unwrap();
+        assert!(result.success);
+        assert_eq!(result.message, "업데이트 완료");
+        assert_eq!(result.version, "0.3.0");
+    }
     #[test]
     fn versions_and_launcher_contract() {
         assert!(newer("v1.2.0", "1.1.0"));

@@ -73,10 +73,10 @@ foreach ($packageDirectory in $npmPackages) {
     if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf)) { continue }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     $name = [string]$manifest.name
-    $version = [string]$manifest.version
+    $dependencyVersion = [string]$manifest.version
     $license = if ($manifest.license) { [string]$manifest.license } else { 'license not declared in package metadata' }
     $notices.Add("=" * 78)
-    $notices.Add("npm: $name@$version | License: $license")
+    $notices.Add("npm: $name@$dependencyVersion | License: $license")
     $licenseFile = if ($manifest.licenseFile) { [string]$manifest.licenseFile } else { $null }
     $files = Get-LicenseFiles $packageDirectory $licenseFile
     if ($files.Count -eq 0) { $notices.Add('(No license text file was shipped in this npm package.)') }

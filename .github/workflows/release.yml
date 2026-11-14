@@ -47,7 +47,7 @@ jobs:
           $version = $Matches.version
           $tauri = [string](Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           $npm = [string](Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ($version -ne '0.3.0' -or $tauri -ne $version -or $npm -ne $version) { throw "Rust, Tauri, and npm versions must all be 0.3.0; found $version/$tauri/$npm." }
+          if ($tauri -ne $version -or $npm -ne $version) { throw "Rust, Tauri, and npm versions must match; found $version/$tauri/$npm." }
           if ($env:GITHUB_REF -match '^refs/tags/') {
             if ($env:GITHUB_REF_NAME -notmatch '^v(\d+\.\d+\.\d+)$') { throw "Release tag must use vMAJOR.MINOR.PATCH; found '$env:GITHUB_REF_NAME'." }
             if ($Matches[1] -ne $version) { throw "Tag version $($Matches[1]) does not match app version $version." }

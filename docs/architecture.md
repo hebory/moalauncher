@@ -1,5 +1,7 @@
 # 구성 및 동작
 
+이 문서는 보존된 WPF 구현의 설계입니다. Rust + Tauri 2 구현과 데이터 호환 규칙은 [Rust 이행 계약](rust-migration-contract.md)을 참고하세요.
+
 Moa Launcher는 .NET 8 WPF 앱과 .NET 8 코어 라이브러리로 나눕니다. UI는 화면 입력, 진행 상태 및 오류를 표시하고 `MoaLauncher.Core`의 서비스 인터페이스를 호출합니다. 코어에는 공개 카탈로그 모델, 설치 모델, 릴리스 선택 규칙, 파일 경로 검사, GitHub API 캐시와 패키지 다운로드가 있습니다.
 
 ## 요청 흐름

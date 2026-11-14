@@ -8,7 +8,7 @@
 
 [최신 릴리스](https://github.com/hebory/moalauncher/releases/latest)에서 `MoaLauncher-<버전>-Setup-x64.exe`를 내려받아 실행하세요. 현재 사용자 계정에 설치되며 시작 메뉴의 **Moa Launcher**로 열 수 있습니다. 별도 .NET 설치는 필요하지 않습니다. 포터블 사용은 같은 릴리스의 ZIP을 별도 폴더에 풀어 실행하면 됩니다.
 
-현재 새 런처는 Rust + Tauri 2로 개발하며 소스에서 실행하려면 Windows, Node.js 22, Rust stable이 필요합니다. 기존 WPF 코드는 비교와 이전 버전 유지보수를 위해 `src/`에 보존되어 있습니다.
+현재 새 런처는 Rust + Tauri 2로 개발하며 Windows 10/11 x64와 Microsoft Edge WebView2 Runtime을 사용합니다. 소스에서 실행하려면 Node.js 22, Rust stable, Visual Studio C++ Build Tools가 필요합니다. 기존 WPF 코드는 비교와 이전 버전 유지보수를 위해 `src/`에 보존되어 있습니다.
 
 ```powershell
 npm ci
@@ -56,6 +56,8 @@ npm run desktop:dev
 새 Windows 런처의 버전은 `0.3.0`부터 시작합니다. 화면 코드는 `ui/`, Rust 명령과 Windows 통합은 `src-tauri/`에 있습니다. 기존 WPF 프로젝트와 테스트는 `src/`, `tests/`에 그대로 보존되어 새 앱에 섞이지 않습니다.
 
 첫 Rust 실행에서 기존 `%LOCALAPPDATA%\MoaLauncher` 사용자 데이터를 읽고, 새 형식으로 처음 저장하기 전에 설정·카탈로그·설치 상태를 `migration-backup/tauri-v1/`에 보관합니다. 기존 앱 목록과 개인 카탈로그, 즐겨찾기, 설치 버전, 보기·알림·자동 실행 설정 및 Windows 자격 증명 관리자의 GitHub 인증을 이어받습니다. 새 Rust 런처도 개인 카탈로그와 즐겨찾기를 PC 안에만 저장하며, GitHub 인증 토큰을 설정 파일이나 UI 응답에 기록하지 않습니다. 사용자 지정 `--data-dir` 경로도 유지됩니다.
+
+기존 런처가 트레이에서 실행 중이면 먼저 해당 메뉴의 **종료**를 선택하세요. 같은 데이터 폴더를 사용하는 WPF·Rust 런처는 중복 실행을 막고 기존 창을 활성화합니다. 별도로 시험하려면 `MoaLauncher.exe --data-dir <별도 폴더>`를 사용하세요. GitHub 인증은 데이터 경로별로 분리되므로 별도 폴더에는 자동 복사하지 않습니다.
 
 ```powershell
 # 의존성 설치 및 프런트엔드 테스트·빌드
@@ -131,6 +133,6 @@ ZIP 앱은 사용자 설정을 AppData 같은 별도 위치에 저장하는 구�
 
 ## 설계와 단계 기록
 
-런처는 .NET 8 WPF 한글 앱입니다. 코어 라이브러리가 카탈로그, GitHub 릴리스, 체크섬, 다운로드 및 설치 규칙을 보유하며 앱 화면은 이를 호출합니다. [설계와 구성](docs/architecture.md) 및 [개발 단계 기록](docs/development-log.md)을 참고하세요.
+런처는 Rust + Tauri 2 기반 Windows 한글 앱입니다. Rust가 카탈로그, GitHub 인증·릴리스, 다운로드·설치와 Windows 통합을 처리하고 React 화면은 제한된 Tauri 명령을 호출합니다. [이행 계약](docs/rust-migration-contract.md), [검증 결과](docs/rust-verification.md) 및 [개발 단계 기록](docs/development-log.md)을 참고하세요. 이전 WPF 설계는 [기존 설계와 구성](docs/architecture.md)에 보존했습니다.
 
 [Craft Launcher](https://github.com/storytold/craft-launcher)의 공개 앱 목록 및 릴리스 기반 관리 흐름을 참고했습니다. 앱의 코드, 로고, 이미지 자산은 복사하지 않은 독립 구현입니다.
