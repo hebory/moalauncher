@@ -88,7 +88,7 @@ fn version_tag(tag: &str) -> Result<String, String> {
     }
     Ok(value.to_owned())
 }
-fn package_for_arch<'a>(
+pub(crate) fn package_for_arch<'a>(
     app: &'a AppDefinition,
     arch: &str,
 ) -> Result<&'a PackageDefinition, String> {
@@ -133,7 +133,7 @@ pub(crate) fn wildcard_match(pattern: &str, name: &str) -> bool {
     }
     pi == pb.len()
 }
-fn select_asset<'a>(
+pub(crate) fn select_asset<'a>(
     release: &'a AppRelease,
     package: &PackageDefinition,
 ) -> Result<&'a ReleaseAsset, String> {

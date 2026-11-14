@@ -304,6 +304,104 @@ pub(super) fn checksum_matches(text: &str, asset_name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        credentials,
+        github::{self, ReleaseResult},
+        install,
+        models::{AppDefinition, AppRelease},
+        storage::{self, Paths},
+    };
+    use std::path::PathBuf;
+
+    async fn download_verified_release_asset(
+        client: &reqwest::Client,
+        app: &AppDefinition,
+        release: &AppRelease,
+        token: Option<&str>,
+        destination: &Path,
+    ) -> Result<u64, String> {
+        let package = install::package_for_arch(app, "x64")?;
+        let asset = install::select_asset(release, package)?;
+        let cancel = AtomicBool::new(false);
+        let callback = |_progress: InstallProgress| {};
+        let downloaded = download_asset(
+            client,
+            asset,
+            &app.repository,
+            app.is_private,
+            token,
+            destination,
+            MAX_PACKAGE_BYTES,
+            &app.id,
+            &cancel,
+            &callback,
+        )
+        .await?;
+        if asset.size > 0 && downloaded.bytes != asset.size {
+            return Err("릴리스 자산 크기 검증에 실패했습니다.".into());
+        }
+
+        let expected = if let Some(hash) = asset
+            .sha256
+            .as_deref()
+            .filter(|hash| hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+        {
+            hash.to_ascii_lowercase()
+        } else {
+            let checksum = release
+                .assets
+                .iter()
+                .find(|candidate| {
+                    candidate
+                        .name
+                        .eq_ignore_ascii_case(&(asset.name.clone() + ".sha256"))
+                })
+                .or_else(|| {
+                    release
+                        .assets
+                        .iter()
+                        .find(|candidate| candidate.name.eq_ignore_ascii_case("SHA256SUMS.txt"))
+                })
+                .ok_or("릴리스에 SHA-256 체크섬이 없습니다.")?;
+            let checksum_path = destination.with_extension("checksum");
+            download_asset(
+                client,
+                checksum,
+                &app.repository,
+                app.is_private,
+                token,
+                &checksum_path,
+                1024 * 1024,
+                &app.id,
+                &cancel,
+                &callback,
+            )
+            .await?;
+            let checksum_text = tokio::fs::read_to_string(&checksum_path)
+                .await
+                .map_err(|_| "SHA-256 체크섬 파일을 읽지 못했습니다.")?;
+            let result = checksum_matches(&checksum_text, &asset.name)
+                .ok_or("릴리스 SHA-256 체크섬과 자산 이름이 일치하지 않습니다.");
+            let _ = tokio::fs::remove_file(checksum_path).await;
+            result?
+        };
+        if !constant_hash_eq(&downloaded.sha256, &expected) {
+            return Err("다운로드 파일 SHA-256 검증에 실패했습니다.".into());
+        }
+        Ok(downloaded.bytes)
+    }
+
+    fn constant_hash_eq(actual: &str, expected: &str) -> bool {
+        let (Ok(actual), Ok(expected)) = (hex::decode(actual), hex::decode(expected)) else {
+            return false;
+        };
+        actual.len() == expected.len()
+            && actual
+                .iter()
+                .zip(expected)
+                .fold(0u8, |difference, (a, b)| difference | (a ^ b))
+                == 0
+    }
 
     #[test]
     fn checksum_parser_ignores_empty_lines_and_requires_matching_name() {
@@ -399,5 +497,82 @@ mod tests {
         assert_eq!(std::fs::read_dir(&temp_root).unwrap().count(), 0);
         server.join().unwrap();
         tokio::fs::remove_dir(temp_root).await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "읽기 전용 실프로필 검증으로 GitHub 인증과 네트워크가 필요합니다. 다운로드 파일은 실행하지 않습니다."]
+    async fn live_public_and_private_assets_verify() {
+        let profile = Paths::new(None);
+        let catalog = storage::load_catalog(&profile).expect("기본 카탈로그를 읽어야 합니다.");
+        let personal = storage::load_personal_catalog(&profile)
+            .expect("개인 카탈로그를 읽어야 합니다.");
+        let public_app = catalog
+            .apps
+            .into_iter()
+            .find(|app| {
+                app.repository.eq_ignore_ascii_case("hebory/moaview") && !app.is_private
+            })
+            .expect("공개 모아뷰 항목이 기본 카탈로그에 있어야 합니다.");
+        let private_app = personal
+            .apps
+            .into_iter()
+            .find(|app| app.is_private)
+            .expect("개인 카탈로그에 비공개 앱이 있어야 합니다.");
+        let token = credentials::read_token(&profile)
+            .expect("GitHub 인증 정보 읽기에 실패했습니다.")
+            .expect("GitHub 인증 정보가 필요합니다.");
+        let client = github::client().expect("GitHub 클라이언트를 만들어야 합니다.");
+
+        let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("저장소 경로를 확인해야 합니다.")
+            .to_path_buf();
+        let validation_root = workspace
+            .join("artifacts")
+            .join("rust-download-validation")
+            .join(format!("run-{}", uuid::Uuid::new_v4().simple()));
+        let public_paths = Paths {
+            data_dir: validation_root.join("public-cache"),
+            local_app_data: profile.local_app_data.clone(),
+        };
+
+        // Public release metadata is cached only under the isolated validation folder.
+        let ReleaseResult {
+            release: public_release,
+            is_cached: public_cached,
+        } = github::latest(&client, &public_paths, &public_app)
+            .await
+            .expect("공개 릴리스 정보를 읽어야 합니다.");
+        assert!(!public_cached, "공개 릴리스 정보를 새로 확인해야 합니다.");
+        let public_bytes = download_verified_release_asset(
+            &client,
+            &public_app,
+            &public_release,
+            None,
+            &validation_root.join("public.asset"),
+        )
+        .await
+        .expect("공개 릴리스 자산 다운로드와 SHA-256 검증에 실패했습니다.");
+
+        // Private release metadata uses the profile credential but does not write to profile storage.
+        let ReleaseResult {
+            release: private_release,
+            is_cached: private_cached,
+        } = github::latest(&client, &profile, &private_app)
+            .await
+            .expect("비공개 릴리스 정보를 읽어야 합니다.");
+        assert!(!private_cached, "비공개 릴리스 정보를 새로 확인해야 합니다.");
+        let private_bytes = download_verified_release_asset(
+            &client,
+            &private_app,
+            &private_release,
+            Some(&token),
+            &validation_root.join("private.asset"),
+        )
+        .await
+        .expect("비공개 릴리스 자산 다운로드와 SHA-256 검증에 실패했습니다.");
+
+        println!("public_sha256_verified=true bytes={public_bytes}");
+        println!("private_sha256_verified=true bytes={private_bytes}");
     }
 }
