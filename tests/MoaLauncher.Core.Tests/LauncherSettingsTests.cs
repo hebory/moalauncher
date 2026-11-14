@@ -30,6 +30,55 @@ public sealed class LauncherSettingsTests
         Assert.True(new LauncherSettings().UseGridView);
     }
 
+    [Fact]
+    public void NewSettingsStartWithNoFavoriteApps()
+    {
+        Assert.Empty(new LauncherSettings().FavoriteAppIds);
+    }
+
+    [Fact]
+    public void SavedFavoriteAppsSurviveRestartAndPreserveOtherPreferences()
+    {
+        var original = new LauncherSettings
+        {
+            FavoriteAppIds = ["moaview", "private-tool"],
+            UseGridView = false,
+            CheckOnStartup = false,
+            PeriodicChecks = false,
+            UpdateNotifications = false,
+            CheckIntervalMinutes = 1440
+        };
+
+        var json = JsonSerializer.Serialize(original, CatalogService.JsonOptions);
+        var restored = JsonSerializer.Deserialize<LauncherSettings>(json, CatalogService.JsonOptions)!;
+
+        Assert.Equal(new[] { "moaview", "private-tool" }, restored.FavoriteAppIds);
+        Assert.False(restored.UseGridView);
+        Assert.False(restored.CheckOnStartup);
+        Assert.False(restored.PeriodicChecks);
+        Assert.False(restored.UpdateNotifications);
+        Assert.Equal(1440, restored.CheckIntervalMinutes);
+    }
+
+    [Fact]
+    public void InvalidAndDuplicateFavoriteIdsAreFiltered()
+    {
+        var json = """{"favoriteAppIds":["moaview","bad/id","","moaview","UPPER","safe-app"]}""";
+
+        var restored = JsonSerializer.Deserialize<LauncherSettings>(json, CatalogService.JsonOptions)!;
+
+        Assert.Equal(new[] { "moaview", "safe-app" }, restored.FavoriteAppIds);
+    }
+
+    [Fact]
+    public void NullFavoriteListFallsBackToEmpty()
+    {
+        var settings = JsonSerializer.Deserialize<LauncherSettings>(
+            """{"favoriteAppIds":null}""", CatalogService.JsonOptions)!;
+
+        Assert.Empty(settings.FavoriteAppIds);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

@@ -52,6 +52,14 @@ public sealed record LauncherSettings
     public bool PeriodicChecks { get; init; } = true;
     public bool UpdateNotifications { get; init; } = true;
     public bool UseGridView { get; init; } = true;
+    private IReadOnlyList<string> favoriteAppIds = Array.Empty<string>();
+    public IReadOnlyList<string> FavoriteAppIds
+    {
+        get => favoriteAppIds;
+        init => favoriteAppIds = Array.AsReadOnly((value ?? [])
+            .Where(id => id is not null && System.Text.RegularExpressions.Regex.IsMatch(id, "^[a-z0-9][a-z0-9-]{0,63}$"))
+            .Distinct(StringComparer.Ordinal).Take(256).ToArray());
+    }
     private int checkIntervalMinutes = DefaultCheckIntervalMinutes;
     public int CheckIntervalMinutes
     {

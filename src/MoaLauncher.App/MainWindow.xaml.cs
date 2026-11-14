@@ -128,6 +128,7 @@ public partial class MainWindow : Window
         var launcherItem = new AppItem(SelfUpdateService.Definition)
         {
             IsLauncher = true,
+            IsFavorite = settings.FavoriteAppIds.Contains(SelfUpdateService.Definition.Id),
             IconImage = LauncherArtwork.LoadIcon(),
             CoverImage = LauncherArtwork.LoadCover(),
             Installed = new InstalledApp(SelfUpdateService.Definition.Id, LauncherVersion,
@@ -136,7 +137,7 @@ public partial class MainWindow : Window
         items.Add(launcherItem);
         foreach (var definition in merged.Values)
         {
-            var item = new AppItem(definition);
+            var item = new AppItem(definition) { IsFavorite = settings.FavoriteAppIds.Contains(definition.Id) };
             try { item.Installed = await installations.FindInstalledAsync(definition); }
             catch (Exception ex) { item.Error = ex.Message; App.Log(ex); }
             items.Add(item);
@@ -177,7 +178,8 @@ public partial class MainWindow : Window
         if (AppCards is null) return;
         var search = SearchBox.Text.Trim();
         visibleItems.Clear();
-        foreach (var item in items.Where(i => (filter != "installed" || i.IsInstalled) && (filter != "updates" || i.HasUpdate))
+        foreach (var item in items.Where(i => (filter != "installed" || i.IsInstalled) && (filter != "updates" || i.HasUpdate) &&
+                                              (filter != "favorites" || i.IsFavorite))
             .OrderByDescending(i => filter == "updates" && notifiedAppIds?.Contains(i.Definition.Id) == true))
             if ($"{item.Name} {item.Description} {item.Repository}".Contains(search, StringComparison.OrdinalIgnoreCase)) visibleItems.Add(item);
         LibrarySummary.Text = $"{visibleItems.Count}개 프로그램";
@@ -187,10 +189,11 @@ public partial class MainWindow : Window
         {
             "updates" => "현재 확인된 업데이트가 없습니다. ‘업데이트 확인’으로 최신 상태를 확인하세요.",
             "installed" => "아직 설치된 프로그램이 없습니다. 전체 목록에서 프로그램을 설치해 보세요.",
+            "favorites" => "아직 즐겨찾는 도구가 없습니다. 전체 목록에서 별 버튼을 눌러 추가해 보세요.",
             _ => "새 프로그램을 추가해 나만의 라이브러리를 만들어 보세요."
         };
         EmptyPanel.Visibility = visibleItems.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        foreach (var (button, active) in new[] { (AllFilter, filter == "all"), (InstalledFilter, filter == "installed"), (UpdatesNav, filter == "updates") })
+        foreach (var (button, active) in new[] { (AllFilter, filter == "all"), (FavoritesFilter, filter == "favorites"), (InstalledFilter, filter == "installed"), (UpdatesNav, filter == "updates") })
         {
             button.Background = active ? (Brush)FindResource("SoftAccentBrush") : Brushes.Transparent;
             button.Foreground = (Brush)FindResource(active ? "AccentBrush" : "MutedBrush");
@@ -442,6 +445,18 @@ public partial class MainWindow : Window
 
     private void All_Click(object sender, RoutedEventArgs e) { notifiedAppIds = null; ShowLibrary(); PageTitle.Text = "내 프로그램"; filter = "all"; ApplyFilter(); }
     private void Installed_Click(object sender, RoutedEventArgs e) { notifiedAppIds = null; ShowLibrary(); PageTitle.Text = "내 프로그램"; filter = "installed"; ApplyFilter(); }
+    private void Favorites_Click(object sender, RoutedEventArgs e) { notifiedAppIds = null; ShowLibrary(); PageTitle.Text = "즐겨찾기"; filter = "favorites"; ApplyFilter(); }
+    private async void Favorite_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ready || (sender as FrameworkElement)?.DataContext is not AppItem item) return;
+        item.IsFavorite = !item.IsFavorite;
+        var favorites = settings.FavoriteAppIds.ToHashSet(StringComparer.Ordinal);
+        if (item.IsFavorite) favorites.Add(item.Definition.Id);
+        else favorites.Remove(item.Definition.Id);
+        settings = settings with { FavoriteAppIds = favorites.OrderBy(id => id, StringComparer.Ordinal).ToArray() };
+        ApplyFilter();
+        await SaveSettingsAsync();
+    }
     private void Library_Click(object sender, RoutedEventArgs e) => All_Click(sender, e);
     private void ClearFilters_Click(object sender, RoutedEventArgs e) { SearchBox.Clear(); Library_Click(sender, e); }
     private void Updates_Click(object sender, RoutedEventArgs e) { notifiedAppIds = null; ShowLibrary(); filter = "updates"; PageTitle.Text = "업데이트"; ApplyFilter(); }

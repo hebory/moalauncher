@@ -13,6 +13,21 @@ public sealed class AppItem(AppDefinition definition) : INotifyPropertyChanged
     public bool CanEdit => !IsLauncher && !ActionsBlocked;
     public bool ActionsBlocked { get; set; }
     public bool CanLaunch => IsInstalled && !IsLauncher;
+    private bool isFavorite;
+    public bool IsFavorite
+    {
+        get => isFavorite;
+        set
+        {
+            if (isFavorite == value) return;
+            isFavorite = value;
+            Changed();
+            Changed(nameof(FavoriteActionText));
+            Changed(nameof(FavoriteAutomationName));
+        }
+    }
+    public string FavoriteActionText => IsFavorite ? "즐겨찾기 해제" : "즐겨찾기 추가";
+    public string FavoriteAutomationName => $"{Name} {FavoriteActionText}";
     private AppRelease? release;
     private string notes = "릴리스를 확인하면 새 버전의 변경 사항을 여기에 표시합니다.";
     public AppRelease? Release
