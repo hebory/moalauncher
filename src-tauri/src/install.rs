@@ -88,7 +88,7 @@ fn version_tag(tag: &str) -> Result<String, String> {
     }
     Ok(value.to_owned())
 }
-fn package_for_arch(app: &AppDefinition, arch: &str) -> Result<&PackageDefinition, String> {
+fn package_for_arch<'a>(app: &'a AppDefinition, arch: &str) -> Result<&'a PackageDefinition, String> {
     app.packages
         .iter()
         .find(|p| p.architecture.eq_ignore_ascii_case(arch))
@@ -531,7 +531,7 @@ async fn extract_zip(
             let mut entry = zip
                 .by_index(index)
                 .map_err(|_| "ZIP 항목을 읽지 못했습니다.")?;
-            let raw_name = entry.name().replace('\\', "/");
+            let raw_name = entry.name().map_err(|_| "ZIP 파일 이름을 읽지 못했습니다.")?.replace('\\', "/");
             let directory = entry.is_dir() || raw_name.ends_with('/');
             let Some(name) = archive_entry_name(&raw_name, directory)? else {
                 continue;
@@ -897,7 +897,7 @@ mod tests {
         for kind in ["nsis", "inno"] {
             let app = definition(kind);
             let progress = callback();
-            for version in ["1.0.0", "1.1.0"] {
+            for version in ["1.0.0", "1.0.0", "1.1.0"] {
                 let installer = fixture_root.join("installers").join(format!("setup-{kind}-{version}.exe"));
                 assert!(installer.is_file(), "fixture installer is missing: {}", installer.display());
                 let result = runtime.block_on(install_executable(&paths, &app, &release(version), &app.packages[0], &installer, progress.as_ref(), &AtomicBool::new(false)));
