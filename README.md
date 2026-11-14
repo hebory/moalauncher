@@ -8,11 +8,14 @@
 
 [최신 릴리스](https://github.com/hebory/moalauncher/releases/latest)에서 `MoaLauncher-<버전>-Setup-x64.exe`를 내려받아 실행하세요. 현재 사용자 계정에 설치되며 시작 메뉴의 **Moa Launcher**로 열 수 있습니다. 별도 .NET 설치는 필요하지 않습니다. 포터블 사용은 같은 릴리스의 ZIP을 별도 폴더에 풀어 실행하면 됩니다.
 
-소스에서 실행하려면 Windows와 .NET 8 SDK가 필요합니다.
+현재 새 런처는 Rust + Tauri 2로 개발하며 소스에서 실행하려면 Windows, Node.js 22, Rust stable이 필요합니다. 기존 WPF 코드는 비교와 이전 버전 유지보수를 위해 `src/`에 보존되어 있습니다.
 
 ```powershell
-dotnet run --project src/MoaLauncher.App
+npm ci
+npm run desktop:dev
 ```
+
+기존 WPF 앱을 실행하거나 유지보수할 때는 .NET 8 SDK를 설치한 뒤 `dotnet run --project src/MoaLauncher.App`을 사용하세요. 이 명령은 새 Rust 런처를 실행하지 않습니다.
 
 기본 카탈로그에는 [모아뷰](https://github.com/hebory/moaview), [MoaVCS](https://github.com/hebory/moavcs), [모아검색](https://github.com/hebory/moasearch)이 포함됩니다. 각 저장소의 공개 GitHub Releases에서 최신 안정 버전을 확인하고, `%LOCALAPPDATA%\Programs\MoaView`, `%LOCALAPPDATA%\Programs\moavcs`, `%LOCALAPPDATA%\Programs\moasearch`의 기존 설치를 인식합니다. 다른 프로그램은 **프로그램 추가**로 등록하거나 설정 화면에서 카탈로그 JSON을 가져오세요.
 
@@ -48,7 +51,33 @@ dotnet run --project src/MoaLauncher.App
 
 **닫기(×)**를 누르면 창만 숨기고 시스템 트레이에서 계속 실행됩니다. 숨겨진 동안에도 설정한 간격으로 업데이트를 확인하고 진행 중인 작업을 이어갑니다. 트레이 아이콘을 클릭하거나 메뉴의 **모아 런처 열기**를 선택하면 다시 열립니다. 실행 파일을 다시 실행해도 기존 창이 열립니다. 완전히 끝내려면 트레이 메뉴의 **종료** 또는 설정의 **런처 종료**를 선택하세요. 설치·다운로드 중에는 작업이 끝나거나 다운로드를 취소한 뒤 종료할 수 있습니다.
 
-## 빌드하고 테스트하기
+## Rust + Tauri 2 개발
+
+새 Windows 런처의 버전은 `0.3.0`부터 시작합니다. 화면 코드는 `ui/`, Rust 명령과 Windows 통합은 `src-tauri/`에 있습니다. 기존 WPF 프로젝트와 테스트는 `src/`, `tests/`에 그대로 보존되어 새 앱에 섞이지 않습니다.
+
+첫 Rust 실행에서 기존 `%LOCALAPPDATA%\MoaLauncher` 사용자 데이터를 읽고, 새 형식으로 처음 저장하기 전에 설정·카탈로그·설치 상태를 `migration-backup/tauri-v1/`에 보관합니다. 기존 앱 목록과 개인 카탈로그, 즐겨찾기, 설치 버전, 보기·알림·자동 실행 설정 및 Windows 자격 증명 관리자의 GitHub 인증을 이어받습니다. 새 Rust 런처도 개인 카탈로그와 즐겨찾기를 PC 안에만 저장하며, GitHub 인증 토큰을 설정 파일이나 UI 응답에 기록하지 않습니다. 사용자 지정 `--data-dir` 경로도 유지됩니다.
+
+```powershell
+# 의존성 설치 및 프런트엔드 테스트·빌드
+npm ci
+npm test
+npm run build
+
+# Rust 검사
+cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+# Windows 런처 실행 파일 빌드
+npm run desktop:build
+
+# 빌드된 실행 파일에서 ZIP·설치 프로그램·체크섬 생성
+./scripts/Publish-Rust.ps1
+# 또는 ./scripts/Publish-Rust.ps1 -Version 0.3.0 -IsccPath 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+```
+
+`Publish-Rust.ps1`은 먼저 `npm run desktop:build`로 만든 `src-tauri/target/release/MoaLauncher.exe`를 확인하고, Inno Setup 6으로 사용자별 설치 프로그램을 만듭니다. 버전은 Cargo, Tauri, npm 설정에서 일치해야 합니다. ZIP과 설치 프로그램, SHA-256 파일은 `artifacts/rust-distribution/`에 생성됩니다. GitHub Actions는 CI에서 프런트엔드·Rust 테스트와 Windows 빌드를 실행하며, 릴리스 워크플로는 버전 태그에서 검증 후 패키지를 게시합니다.
+
+## 기존 WPF 앱 빌드와 테스트 (legacy)
 
 ```powershell
 dotnet build MoaLauncher.sln -c Release
@@ -63,7 +92,9 @@ NSIS 설치기의 실제 실행 검증은 설치된 NSIS 컴파일러로 별도�
 ./scripts/Test-NsisInstall.ps1 -MakensisPath 'C:\Program Files (x86)\NSIS\makensis.exe'
 ```
 
-게시용 Windows x64 포터블 ZIP, 사용자별 설치 프로그램과 체크섬은 다음 명령으로 만듭니다. 버전은 `Directory.Build.props`의 `Version` 값을 사용합니다. Inno Setup 6이 기본 경로에 없으면 컴파일러 경로를 지정합니다.
+## 기존 WPF 앱 배포 (legacy)
+
+기존 .NET WPF 런처의 Windows x64 포터블 ZIP, 사용자별 설치 프로그램과 체크섬은 다음 명령으로 만듭니다. 버전은 `Directory.Build.props`의 `Version` 값을 사용합니다. Inno Setup 6이 기본 경로에 없으면 컴파일러 경로를 지정합니다.
 
 ```powershell
 ./scripts/Publish.ps1
@@ -74,7 +105,7 @@ NSIS 설치기의 실제 실행 검증은 설치된 NSIS 컴파일러로 별도�
 
 두 배포 형식은 각각 `.sha256` 파일이 생성되며 `SHA256SUMS.txt`에 두 파일의 SHA-256이 함께 기록됩니다. 내려받은 파일은 실행 전에 체크섬을 확인하세요. 포터블 ZIP은 .NET 8 런타임을 포함하므로 사용자의 PC에 .NET 설치가 필요하지 않습니다.
 
-GitHub Action은 Windows 빌드·테스트와 정상/백그라운드 실행 스모크 확인을 마친 뒤 `v*` 태그에서 ZIP, 설치기와 체크섬 파일을 GitHub Release에 첨부합니다. 자동 생성되는 릴리스 설명은 한국어입니다. 기존 릴리스에 동일한 파일명이 있으면 덮어쓰지 않고 실패합니다. 브랜치에서 **Publish Windows release**를 수동 실행하면 공개 릴리스를 변경하지 않고 패키지 생성만 검증하며 산출물을 Actions artifact로 보관합니다. 릴리스는 공개 저장소의 안정 버전만 사용하세요.
+이 스크립트는 이전 WPF 설치 형식과 체크섬을 필요할 때 다시 만들기 위한 legacy 경로이며 `artifacts/distribution/`에 출력합니다. 현재 `v*` 태그의 GitHub Release는 위 Rust 워크플로가 게시하며, Rust ZIP·설치기와 체크섬을 포함합니다. Release job은 기존 릴리스나 같은 이름의 파일을 덮어쓰지 않습니다. WPF 솔루션의 빌드와 테스트는 CI에 남아 비교·회귀 확인에 사용됩니다.
 
 ## 새 앱 등록하기
 
