@@ -22,3 +22,30 @@ jobs:
       - run: dotnet test MoaLauncher.sln -c Release --no-build --logger "console;verbosity=normal"
       - run: dotnet run --project tests/MoaLauncher.App.SmokeTests -c Release --no-build
       - run: dotnet run --project tests/MoaLauncher.App.SmokeTests -c Release --no-build -- --background
+
+  rust-tauri:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Install npm dependencies
+        run: npm ci
+      - name: Run frontend tests
+        run: npm test -- --passWithNoTests
+      - name: Build frontend
+        run: npm run build
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - name: Run Rust lint
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - name: Run Rust tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: Build Windows desktop executable
+        run: npm run desktop:build

@@ -1,4 +1,4 @@
-name: Publish Windows release
+name: Publish Rust Windows release
 
 on:
   push:
@@ -6,92 +6,131 @@ on:
       - 'v*'
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  publish:
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+  build:
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-node@v4
         with:
-          dotnet-version: 8.0.x
-      - run: dotnet restore MoaLauncher.sln
-      - run: dotnet build MoaLauncher.sln -c Release --no-restore
-      - run: dotnet test MoaLauncher.sln -c Release --no-build --logger "console;verbosity=normal"
-      - name: Run launcher smoke checks
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Install npm dependencies
+        run: npm ci
+      - name: Run frontend tests
+        run: npm test -- --passWithNoTests
+      - name: Build frontend
+        run: npm run build
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - name: Run Rust lint
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - name: Run Rust tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: Verify tag and project versions
         shell: pwsh
         run: |
-          dotnet run --project tests/MoaLauncher.App.SmokeTests -c Release --no-build
-          if ($LASTEXITCODE -ne 0) { throw 'Normal launcher smoke check failed.' }
-          dotnet run --project tests/MoaLauncher.App.SmokeTests -c Release --no-build -- --background
-          if ($LASTEXITCODE -ne 0) { throw 'Background launcher smoke check failed.' }
-      - name: Check tag and app version
-        shell: pwsh
-        run: |
-          [xml]$project = Get-Content Directory.Build.props
-          $version = [string]$project.Project.PropertyGroup.Version
-          if (!$version) { throw 'Directory.Build.props에 Version이 없습니다.' }
+          $cargo = Get-Content src-tauri/Cargo.toml -Raw
+          if ($cargo -notmatch '(?ms)^\[package\]\s*.*?^version\s*=\s*"(?<version>\d+\.\d+\.\d+)"') { throw 'Cargo package version is missing.' }
+          $version = $Matches.version
+          $tauri = [string](Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $npm = [string](Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($version -ne '0.3.0' -or $tauri -ne $version -or $npm -ne $version) { throw "Rust, Tauri, and npm versions must all be 0.3.0; found $version/$tauri/$npm." }
           if ($env:GITHUB_REF -match '^refs/tags/') {
-            $tag = $env:GITHUB_REF_NAME
-            if ($tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw "Release tag must use vMAJOR.MINOR.PATCH; found '$tag'." }
-            $tagVersion = $Matches[1]
-            if ($tagVersion -ne $version) { throw "Tag $tagVersion does not match project version $version. Update the project version before tagging." }
-            $version = $tagVersion
+            if ($env:GITHUB_REF_NAME -notmatch '^v(\d+\.\d+\.\d+)$') { throw "Release tag must use vMAJOR.MINOR.PATCH; found '$env:GITHUB_REF_NAME'." }
+            if ($Matches[1] -ne $version) { throw "Tag version $($Matches[1]) does not match app version $version." }
           }
           "MOA_RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build Windows desktop executable
+        run: npm run desktop:build
       - name: Find Inno Setup Compiler
         shell: pwsh
         run: |
           $candidates = @(
-            @(
-              (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'),
-              (Join-Path $env:ProgramFiles 'Inno Setup 6/ISCC.exe')
-            ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
-          )
+            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'),
+            (Join-Path $env:ProgramFiles 'Inno Setup 6/ISCC.exe')
+          ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
           if ($candidates.Count -eq 0) { throw 'Inno Setup 6 ISCC.exe was not found on this runner.' }
           "MOA_ISCC_PATH=$($candidates[0])" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - name: Publish ZIP, installer, and checksums
+      - name: Package Rust launcher
         shell: pwsh
-        run: ./scripts/Publish.ps1 -Version $env:MOA_RELEASE_VERSION -IsccPath $env:MOA_ISCC_PATH
-      - name: Store package verification artifacts
-        if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/v')
+        run: ./scripts/Publish-Rust.ps1 -Version $env:MOA_RELEASE_VERSION -IsccPath $env:MOA_ISCC_PATH
+      - name: Store packages for verification or publishing
         uses: actions/upload-artifact@v4
         with:
-          name: moa-launcher-${{ env.MOA_RELEASE_VERSION }}-windows-x64-package-check
-          path: artifacts/distribution/*
+          name: moa-launcher-rust-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/rust-distribution/*
           if-no-files-found: error
           retention-days: 14
-      - name: Upload GitHub Release assets
-        if: startsWith(github.ref, 'refs/tags/v')
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: moa-launcher-rust-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/rust-distribution
+      - name: Verify unique tag and package checksums
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $dist = 'artifacts/distribution'
-          $archive = "$dist/moa-launcher-$env:MOA_RELEASE_VERSION-windows-x64.zip"
-          $installer = "$dist/MoaLauncher-$env:MOA_RELEASE_VERSION-Setup-x64.exe"
-          $assets = @($archive, "$archive.sha256", $installer, "$installer.sha256", "$dist/SHA256SUMS.txt")
-          $checksums = 'artifacts/distribution/SHA256SUMS.txt'
-          if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            $releaseJson = gh release view $env:GITHUB_REF_NAME --json assets 2>$null
-            if ($LASTEXITCODE -ne 0) {
-              gh release create $env:GITHUB_REF_NAME @assets --title "Moa Launcher $env:MOA_RELEASE_VERSION" --notes "Moa Launcher $env:MOA_RELEASE_VERSION Windows 배포입니다.`n`n포터블 ZIP과 사용자별 설치 프로그램을 제공합니다. SHA-256 체크섬을 확인한 뒤 실행하세요."
-            } else {
-              $existing = ($releaseJson | ConvertFrom-Json).assets | ForEach-Object { $_.name }
-              $duplicates = @($assets | ForEach-Object { Split-Path $_ -Leaf } | Where-Object { $existing -contains $_ })
-              if ($duplicates.Count -gt 0) { throw "Release already contains asset(s): $($duplicates -join ', '). Existing release assets are never overwritten." }
-              gh release upload $env:GITHUB_REF_NAME @assets
-              if ($LASTEXITCODE -ne 0) { throw 'GitHub Release asset upload failed.' }
-            }
-          } else {
-            throw 'Manual release publishing must run from a version tag (vMAJOR.MINOR.PATCH).'
+          $tag = $env:GITHUB_REF_NAME
+          if ($tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw "Release tag must use vMAJOR.MINOR.PATCH; found '$tag'." }
+          $version = $Matches[1]
+          $dist = 'artifacts/rust-distribution'
+          $archiveName = "moa-launcher-$version-windows-x64.zip"
+          $installerName = "MoaLauncher-$version-Setup-x64.exe"
+          $expected = @($archiveName, "$archiveName.sha256", $installerName, "$installerName.sha256", 'SHA256SUMS.txt') | Sort-Object
+          $actual = @(Get-ChildItem -LiteralPath $dist -File | ForEach-Object Name | Sort-Object)
+          if (Compare-Object -ReferenceObject $expected -DifferenceObject $actual) { throw "Unexpected release artifact set: $($actual -join ', ')" }
+          foreach ($name in @($archiveName, $installerName)) {
+            $asset = Join-Path $dist $name
+            $actualHash = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+            $sidecar = (Get-Content -LiteralPath "$asset.sha256" -Raw).Trim()
+            if ($sidecar -notmatch "^$actualHash\s+$([regex]::Escape($name))$") { throw "Checksum sidecar mismatch for $name." }
           }
+          $sumLines = Get-Content -LiteralPath (Join-Path $dist 'SHA256SUMS.txt')
+          if ($sumLines.Count -ne 2) { throw 'SHA256SUMS.txt must contain exactly two entries.' }
+          foreach ($line in $sumLines) {
+            if ($line -notmatch '^([a-f0-9]{64}) \*(.+)$') { throw 'SHA256SUMS.txt format is invalid.' }
+            $name = $Matches[2]
+            if ($name -notin @($archiveName, $installerName)) { throw "Unexpected file in SHA256SUMS.txt: $name" }
+            $actualHash = (Get-FileHash -LiteralPath (Join-Path $dist $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($Matches[1] -ne $actualHash) { throw "SHA256SUMS.txt checksum mismatch for $name." }
+          }
+          $releaseJson = gh release view $tag --json tagName 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists; existing releases are not overwritten." }
+          if ($LASTEXITCODE -ne 1) { throw 'Unable to check for an existing GitHub Release.' }
+      - name: Publish verified packages
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $version = $tag.Substring(1)
+          $dist = 'artifacts/rust-distribution'
+          gh release create $tag `
+            "$dist/moa-launcher-$version-windows-x64.zip" `
+            "$dist/moa-launcher-$version-windows-x64.zip.sha256" `
+            "$dist/MoaLauncher-$version-Setup-x64.exe" `
+            "$dist/MoaLauncher-$version-Setup-x64.exe.sha256" `
+            "$dist/SHA256SUMS.txt" `
+            --verify-tag --title "Moa Launcher $version" `
+            --notes "Moa Launcher $version Windows 배포입니다.`n`nRust + Tauri 2 런처의 ZIP과 설치 프로그램입니다. SHA-256 체크섬은 SHA256SUMS.txt에서 확인할 수 있습니다."
