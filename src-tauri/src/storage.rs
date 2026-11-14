@@ -39,15 +39,44 @@ fn absolute_lexical(path: &Path) -> PathBuf {
     } else {
         std::env::current_dir().unwrap_or_default().join(path)
     };
-    absolute.components().collect()
+    let mut normalized = PathBuf::new();
+    let mut rooted = false;
+    for component in absolute.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => {
+                normalized.push(component.as_os_str());
+                rooted = true;
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if normalized.file_name().is_some() {
+                    normalized.pop();
+                } else if !rooted {
+                    normalized.push("..");
+                }
+            }
+            Component::Normal(name) => normalized.push(name),
+        }
+    }
+    normalized
 }
 
 pub fn normalize_path(path: &Path) -> String {
     let normalized = absolute_lexical(path);
+    // `components()` removes non-root trailing separators. Keep the root separator
+    // intact, matching Path.TrimEndingDirectorySeparator rather than turning C:\ into C:.
     normalized
         .to_string_lossy()
-        .trim_end_matches(['\\', '/'])
-        .to_uppercase()
+        .chars()
+        .map(|character| {
+            let mut uppercase = character.to_uppercase();
+            match (uppercase.next(), uppercase.next()) {
+                (Some(single), None) => single,
+                _ => character,
+            }
+        })
+        .collect()
 }
 
 pub fn valid_repo(repo: &str) -> bool {
@@ -586,5 +615,20 @@ mod tests {
     fn unsafe_paths_are_rejected() {
         assert!(safe_relative(Path::new("C:/root"), "../secret.exe").is_err());
         assert!(safe_relative(Path::new("root"), "folder/app.exe").is_ok());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn data_path_normalization_matches_dotnet_roots_and_unc_paths() {
+        assert_eq!(
+            normalize_path(Path::new(r"C:\Users\tester\..\Data\MoaLauncher\")),
+            r"C:\USERS\DATA\MOALAUNCHER"
+        );
+        assert_eq!(normalize_path(Path::new("C:\\")), "C:\\");
+        assert_eq!(
+            normalize_path(Path::new(r"\\server\share\folder\..\data")),
+            r"\\SERVER\SHARE\DATA"
+        );
+        assert_eq!(normalize_path(Path::new("C:\\ß")), "C:\\ß");
     }
 }
