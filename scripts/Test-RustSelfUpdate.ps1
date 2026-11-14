@@ -120,10 +120,11 @@ internal static class FakeInstaller
         if (log != null) File.WriteAllText(log, "fixture installer invoked");
         string modeFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "installer-mode.txt");
         string mode = File.ReadAllText(modeFile).Trim();
-        if (mode == "FAIL") return 17;
         string source = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, mode == "WRONG_VERSION" ? "wrong.exe" : "new.exe");
         File.Copy(source, Path.Combine(target, "MoaLauncher.exe"), true);
         File.WriteAllText(Path.Combine(target, "installer-touched.txt"), mode);
+        // Exercise rollback after a failing installer has already modified target files.
+        if (mode == "FAIL") return 17;
         return 0;
     }
 }
