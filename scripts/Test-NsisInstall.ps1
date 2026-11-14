@@ -14,7 +14,6 @@ $installersRoot = [IO.Path]::GetFullPath((Join-Path $fixtureRoot 'installers'))
 
 if ([string]::IsNullOrWhiteSpace($MakensisPath)) {
     $candidates = @(
-        (Join-Path $env:LOCALAPPDATA 'tauri/NSIS/makensis.exe'),
         (Join-Path $env:ProgramFiles 'NSIS/makensis.exe'),
         (Join-Path ${env:ProgramFiles(x86)} 'NSIS/makensis.exe')
     ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }

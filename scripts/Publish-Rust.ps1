@@ -7,19 +7,15 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$cargoPath = Join-Path $repositoryRoot 'src-tauri/Cargo.toml'
-$tauriConfigPath = Join-Path $repositoryRoot 'src-tauri/tauri.conf.json'
-$npmPath = Join-Path $repositoryRoot 'package.json'
+$cargoPath = Join-Path $repositoryRoot 'native/Cargo.toml'
 $cargoText = Get-Content -LiteralPath $cargoPath -Raw
 if ($cargoText -notmatch '(?ms)^\[package\]\s*.*?^version\s*=\s*"(?<version>\d+\.\d+\.\d+)"') {
-    throw 'src-tauri/Cargo.toml package version is missing or invalid.'
+    throw 'native/Cargo.toml package version is missing or invalid.'
 }
 $cargoVersion = $Matches.version
-$tauriVersion = [string](Get-Content -LiteralPath $tauriConfigPath -Raw | ConvertFrom-Json).version
-$npmVersion = [string](Get-Content -LiteralPath $npmPath -Raw | ConvertFrom-Json).version
 if (!$Version) { $Version = $cargoVersion }
-if ($Version -ne $cargoVersion -or $Version -ne $tauriVersion -or $Version -ne $npmVersion) {
-    throw "Requested version '$Version' must match Cargo ($cargoVersion), Tauri ($tauriVersion), and npm ($npmVersion)."
+if ($Version -ne $cargoVersion) {
+    throw "Requested version '$Version' must match Cargo ($cargoVersion)."
 }
 
 $artifactRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'artifacts'))
@@ -32,9 +28,9 @@ if (!$distributionDirectory.StartsWith($artifactPrefix, [StringComparison]::Ordi
 if (Test-Path -LiteralPath $distributionDirectory) { Remove-Item -LiteralPath $distributionDirectory -Recurse -Force }
 New-Item -ItemType Directory -Path $stageDirectory -Force | Out-Null
 
-$executable = Join-Path $repositoryRoot 'src-tauri/target/release/MoaLauncher.exe'
+$executable = Join-Path $repositoryRoot 'native/target/release/MoaLauncher.exe'
 if (!(Test-Path -LiteralPath $executable -PathType Leaf)) {
-    throw "Rust launcher executable was not found. Build src-tauri first: $executable"
+    throw "Rust launcher executable was not found. Build native first: $executable"
 }
 $exeVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($executable).ProductVersion
 if ($exeVersion) {
@@ -63,28 +59,6 @@ $notices.Add("Moa Launcher $Version third-party license notices")
 $notices.Add('')
 $notices.Add('The launcher is distributed under the MIT License in LICENSE.')
 $notices.Add('')
-
-# Include notices and license texts for the installed npm dependency tree.
-$npmPackages = & npm ls --all --parseable
-if ($LASTEXITCODE -ne 0) { throw 'npm ls failed while collecting dependency license notices.' }
-foreach ($packageDirectory in $npmPackages) {
-    if (!$packageDirectory -or $packageDirectory -eq $repositoryRoot) { continue }
-    $manifestPath = Join-Path $packageDirectory 'package.json'
-    if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf)) { continue }
-    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    $name = [string]$manifest.name
-    $dependencyVersion = [string]$manifest.version
-    $license = if ($manifest.license) { [string]$manifest.license } else { 'license not declared in package metadata' }
-    $notices.Add("=" * 78)
-    $notices.Add("npm: $name@$dependencyVersion | License: $license")
-    $licenseFile = if ($manifest.licenseFile) { [string]$manifest.licenseFile } else { $null }
-    $files = Get-LicenseFiles $packageDirectory $licenseFile
-    if ($files.Count -eq 0) { $notices.Add('(No license text file was shipped in this npm package.)') }
-    foreach ($file in $files) {
-        $notices.Add("--- $([IO.Path]::GetFileName($file)) ---")
-        $notices.Add((Get-Content -LiteralPath $file -Raw))
-    }
-}
 
 # Include license texts for the resolved Cargo dependency graph.
 $cargoMetadata = & cargo metadata --locked --format-version 1 --manifest-path $cargoPath | ConvertFrom-Json -AsHashtable
@@ -124,12 +98,14 @@ $archiveHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.T
 if (!$IsccPath) {
     $candidates = @(
         (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'),
-        (Join-Path $env:ProgramFiles 'Inno Setup 6/ISCC.exe')
+        (Join-Path $env:ProgramFiles 'Inno Setup 6/ISCC.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 7/ISCC.exe'),
+        (Join-Path $env:ProgramFiles 'Inno Setup 7/ISCC.exe')
     ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
     if ($candidates.Count -gt 0) { $IsccPath = $candidates[0] }
 }
 if (!$IsccPath -or !(Test-Path -LiteralPath $IsccPath -PathType Leaf)) {
-    throw 'Inno Setup Compiler (ISCC.exe) was not found. Install Inno Setup 6 or pass -IsccPath with a valid path.'
+    throw 'Inno Setup Compiler (ISCC.exe) was not found. Install Inno Setup 6 or 7, or pass -IsccPath with a valid path.'
 }
 $installerScript = Join-Path $repositoryRoot 'installer/MoaLauncher.iss'
 & $IsccPath "/DVersion=$Version" "/DPublishDir=$stageDirectory" "/DOutputDir=$distributionDirectory" $installerScript

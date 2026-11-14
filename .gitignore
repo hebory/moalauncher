@@ -8,8 +8,4 @@ TestResults/
 *.suo
 node_modules/
 dist/
-src-tauri/target/
-src-tauri/gen/
-
 native/target/
-native/gen/

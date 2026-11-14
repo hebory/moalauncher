@@ -3,12 +3,12 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$runnerSource = Join-Path $repositoryRoot 'src-tauri/target/release/MoaLauncher.exe'
+$runnerSource = Join-Path $repositoryRoot 'native/target/release/MoaLauncher.exe'
 if (!(Test-Path -LiteralPath $runnerSource -PathType Leaf)) {
-    $runnerSource = Join-Path $repositoryRoot 'src-tauri/target/debug/MoaLauncher.exe'
+    $runnerSource = Join-Path $repositoryRoot 'native/target/debug/MoaLauncher.exe'
 }
 if (!(Test-Path -LiteralPath $runnerSource -PathType Leaf)) {
-    throw "Rust helper runner is not built. Expected release or debug executable under src-tauri/target."
+    throw "Rust helper runner is not built. Expected release or debug executable under native/target."
 }
 
 $artifactRoot = [IO.Path]::GetFullPath((Join-Path $repositoryRoot 'artifacts'))

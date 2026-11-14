@@ -8,11 +8,10 @@
 
 [최신 릴리스](https://github.com/hebory/moalauncher/releases/latest)에서 `MoaLauncher-<버전>-Setup-x64.exe`를 내려받아 실행하세요. 현재 사용자 계정에 설치되며 시작 메뉴의 **Moa Launcher**로 열 수 있습니다. 별도 .NET 설치는 필요하지 않습니다. 포터블 사용은 같은 릴리스의 ZIP을 별도 폴더에 풀어 실행하면 됩니다.
 
-현재 새 런처는 Rust + Tauri 2로 개발하며 Windows 10/11 x64와 Microsoft Edge WebView2 Runtime을 사용합니다. 소스에서 실행하려면 Node.js 22, Rust stable, Visual Studio C++ Build Tools가 필요합니다. 기존 WPF 코드는 비교와 이전 버전 유지보수를 위해 `src/`에 보존되어 있습니다.
+현재 새 런처는 Rust와 eframe/egui로 구현한 Windows 10/11 x64 네이티브 앱입니다. 런타임 WebView2나 Node.js는 필요하지 않습니다. 소스에서 빌드하려면 Rust stable과 Visual Studio C++ Build Tools 및 Windows SDK가 필요합니다. 기존 WPF 코드는 비교와 이전 버전 유지보수를 위해 `src/`에 보존되어 있습니다.
 
 ```powershell
-npm ci
-npm run desktop:dev
+cargo run --manifest-path native/Cargo.toml
 ```
 
 기존 WPF 앱을 실행하거나 유지보수할 때는 .NET 8 SDK를 설치한 뒤 `dotnet run --project src/MoaLauncher.App`을 사용하세요. 이 명령은 새 Rust 런처를 실행하지 않습니다.
@@ -51,33 +50,29 @@ npm run desktop:dev
 
 **닫기(×)**를 누르면 창만 숨기고 시스템 트레이에서 계속 실행됩니다. 숨겨진 동안에도 설정한 간격으로 업데이트를 확인하고 진행 중인 작업을 이어갑니다. 트레이 아이콘을 클릭하거나 메뉴의 **모아 런처 열기**를 선택하면 다시 열립니다. 실행 파일을 다시 실행해도 기존 창이 열립니다. 완전히 끝내려면 트레이 메뉴의 **종료** 또는 설정의 **런처 종료**를 선택하세요. 설치·다운로드 중에는 작업이 끝나거나 다운로드를 취소한 뒤 종료할 수 있습니다.
 
-## Rust + Tauri 2 개발
+## Rust 네이티브 개발
 
-새 Windows 런처의 버전은 `0.3.0`부터 시작합니다. 화면 코드는 `ui/`, Rust 명령과 Windows 통합은 `src-tauri/`에 있습니다. 기존 WPF 프로젝트와 테스트는 `src/`, `tests/`에 그대로 보존되어 새 앱에 섞이지 않습니다.
+새 Windows 런처의 버전은 `0.3.0`부터 시작합니다. 화면과 앱 로직은 Rust 코드이며 `native/`의 Cargo 프로젝트가 실행 파일을 만듭니다. GUI는 eframe/egui와 glow 렌더러를 사용합니다. 기존 WPF 프로젝트와 테스트는 `src/`, `tests/`에 그대로 보존되어 새 앱에 섞이지 않습니다.
 
-첫 Rust 실행에서 기존 `%LOCALAPPDATA%\MoaLauncher` 사용자 데이터를 읽고, 새 형식으로 처음 저장하기 전에 설정·카탈로그·설치 상태를 `migration-backup/tauri-v1/`에 보관합니다. 기존 앱 목록과 개인 카탈로그, 즐겨찾기, 설치 버전, 보기·알림·자동 실행 설정 및 Windows 자격 증명 관리자의 GitHub 인증을 이어받습니다. 새 Rust 런처도 개인 카탈로그와 즐겨찾기를 PC 안에만 저장하며, GitHub 인증 토큰을 설정 파일이나 UI 응답에 기록하지 않습니다. 사용자 지정 `--data-dir` 경로도 유지됩니다.
+첫 Rust 실행에서 기존 `%LOCALAPPDATA%\MoaLauncher` 사용자 데이터를 읽고, 새 형식으로 처음 저장하기 전에 설정·카탈로그·설치 상태를 `migration-backup/tauri-v1/`에 보관합니다. 기존 앱 목록과 개인 카탈로그, 즐겨찾기, 설치 버전, 보기·알림·자동 실행 설정 및 Windows 자격 증명 관리자의 GitHub 인증을 이어받습니다. 새 Rust 런처도 개인 카탈로그와 즐겨찾기를 PC 안에만 저장하며, GitHub 인증 토큰을 설정 파일에 기록하지 않습니다. 사용자 지정 `--data-dir` 경로도 유지됩니다.
 
 기존 런처가 트레이에서 실행 중이면 먼저 해당 메뉴의 **종료**를 선택하세요. 같은 데이터 폴더를 사용하는 WPF·Rust 런처는 중복 실행을 막고 기존 창을 활성화합니다. 별도로 시험하려면 `MoaLauncher.exe --data-dir <별도 폴더>`를 사용하세요. GitHub 인증은 데이터 경로별로 분리되므로 별도 폴더에는 자동 복사하지 않습니다.
 
 ```powershell
-# 의존성 설치 및 프런트엔드 테스트·빌드
-npm ci
-npm test
-npm run build
-
 # Rust 검사
-cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-cargo test --locked --manifest-path src-tauri/Cargo.toml
+cargo fmt --manifest-path native/Cargo.toml --all -- --check
+cargo clippy --locked --manifest-path native/Cargo.toml --all-targets -- -D warnings
+cargo test --locked --manifest-path native/Cargo.toml
 
 # Windows 런처 실행 파일 빌드
-npm run desktop:build
+cargo build --locked --manifest-path native/Cargo.toml --release
 
 # 빌드된 실행 파일에서 ZIP·설치 프로그램·체크섬 생성
 ./scripts/Publish-Rust.ps1
 # 또는 ./scripts/Publish-Rust.ps1 -Version 0.3.0 -IsccPath 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
 ```
 
-`Publish-Rust.ps1`은 먼저 `npm run desktop:build`로 만든 `src-tauri/target/release/MoaLauncher.exe`를 확인하고, Inno Setup 6으로 사용자별 설치 프로그램을 만듭니다. 버전은 Cargo, Tauri, npm 설정에서 일치해야 합니다. ZIP과 설치 프로그램, SHA-256 파일은 `artifacts/rust-distribution/`에 생성됩니다. GitHub Actions는 CI에서 프런트엔드·Rust 테스트와 Windows 빌드를 실행하며, 릴리스 워크플로는 버전 태그에서 검증 후 패키지를 게시합니다.
+`Publish-Rust.ps1`은 `native/target/release/MoaLauncher.exe`를 확인하고 Cargo 의존성의 라이선스 고지를 수집한 뒤 ZIP, Inno Setup 6/7 사용자별 설치 프로그램, SHA-256 체크섬을 만듭니다. 버전의 단일 기준은 `native/Cargo.toml`입니다. GitHub Actions는 Rust 형식 검사·clippy·테스트·Windows 빌드를 실행하며, 릴리스 워크플로는 버전 태그를 검증한 뒤 패키지를 게시합니다.
 
 ## 기존 WPF 앱 빌드와 테스트 (legacy)
 
@@ -133,6 +128,6 @@ ZIP 앱은 사용자 설정을 AppData 같은 별도 위치에 저장하는 구�
 
 ## 설계와 단계 기록
 
-런처는 Rust + Tauri 2 기반 Windows 한글 앱입니다. Rust가 카탈로그, GitHub 인증·릴리스, 다운로드·설치와 Windows 통합을 처리하고 React 화면은 제한된 Tauri 명령을 호출합니다. [이행 계약](docs/rust-migration-contract.md), [검증 결과](docs/rust-verification.md) 및 [개발 단계 기록](docs/development-log.md)을 참고하세요. 이전 WPF 설계는 [기존 설계와 구성](docs/architecture.md)에 보존했습니다.
+런처는 Rust 기반 Windows 한글 앱입니다. eframe/egui가 네이티브 GUI를 그리며 Rust 코드가 카탈로그, GitHub 인증·릴리스, 다운로드·설치와 Windows 통합을 처리합니다. [네이티브 이행 안내](docs/native-migration.md), [이전 Tauri 이행 계약](docs/rust-migration-contract.md), [검증 결과](docs/rust-verification.md) 및 [개발 단계 기록](docs/development-log.md)을 참고하세요. 이전 WPF 설계는 [기존 설계와 구성](docs/architecture.md)에 보존했습니다.
 
 [Craft Launcher](https://github.com/storytold/craft-launcher)의 공개 앱 목록 및 릴리스 기반 관리 흐름을 참고했습니다. 앱의 코드, 로고, 이미지 자산은 복사하지 않은 독립 구현입니다.
