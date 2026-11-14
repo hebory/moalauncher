@@ -87,7 +87,7 @@ foreach ($packageDirectory in $npmPackages) {
 }
 
 # Include license texts for the resolved Cargo dependency graph.
-$cargoMetadata = & cargo metadata --locked --format-version 1 --manifest-path $cargoPath | ConvertFrom-Json
+$cargoMetadata = & cargo metadata --locked --format-version 1 --manifest-path $cargoPath | ConvertFrom-Json -AsHashtable
 if ($LASTEXITCODE -ne 0) { throw 'cargo metadata failed while collecting dependency license notices.' }
 $rootPackageId = $cargoMetadata.resolve.root
 foreach ($package in $cargoMetadata.packages) {

@@ -925,7 +925,8 @@ pub fn run() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(index) = args.iter().position(|s| s == "--apply-self-update") {
         if let Some(plan) = args.get(index + 1) {
-            if self_update::run_helper(Path::new(plan)).is_err() {
+            if let Err(error) = self_update::run_helper(Path::new(plan)) {
+                eprintln!("자체 업데이트 helper: {error}");
                 std::process::exit(1);
             }
         } else {

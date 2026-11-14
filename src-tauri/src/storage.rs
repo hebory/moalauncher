@@ -66,7 +66,7 @@ pub fn normalize_path(path: &Path) -> String {
     let normalized = absolute_lexical(path);
     // `components()` removes non-root trailing separators. Keep the root separator
     // intact, matching Path.TrimEndingDirectorySeparator rather than turning C:\ into C:.
-    normalized
+    dunce::simplified(&normalized)
         .to_string_lossy()
         .chars()
         .map(|character| {
@@ -122,7 +122,9 @@ pub fn safe_relative(root: &Path, relative: &str) -> Result<PathBuf, String> {
     {
         return Err("상대 경로 형식이 올바르지 않습니다.".into());
     }
-    Ok(root.join(rel))
+    // Build with native separators: NSIS strips forward slashes in its /D= tail.
+    let native_relative: PathBuf = rel.components().collect();
+    Ok(root.join(native_relative))
 }
 
 pub fn validate_catalog(catalog: &Catalog) -> Result<(), String> {
@@ -633,6 +635,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn data_path_normalization_matches_dotnet_roots_and_unc_paths() {
+        assert_eq!(normalize_path(Path::new(r"\\?\C:\Users\user\Data")), normalize_path(Path::new(r"C:\Users\user\Data")));
         assert_eq!(
             normalize_path(Path::new(r"C:\Users\tester\..\Data\MoaLauncher\")),
             r"C:\USERS\DATA\MOALAUNCHER"

@@ -541,7 +541,13 @@ fn canonical(p: &Path) -> Result<PathBuf, String> {
     if !p.is_absolute() {
         return Err("절대 경로가 필요합니다.".into());
     }
-    let x = fs::canonicalize(p).map_err(|_| "경로를 확인하지 못했습니다.")?;
+    let x = dunce::canonicalize(p).map_err(|error| {
+        format!(
+            "경로를 확인하지 못했습니다: {} (OS error {:?})",
+            p.display(),
+            error.raw_os_error()
+        )
+    })?;
     if x.parent().is_none() {
         return Err("파일 시스템 루트는 사용할 수 없습니다.".into());
     }
