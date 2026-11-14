@@ -22,9 +22,9 @@
 - `github.rs`: `client() -> Result<reqwest::Client,String>`(리디렉션 금지), `latest(client,&Paths,&AppDefinition) -> Result<ReleaseResult,String>`, `verify_token(client,&str) -> Result<String,String>`, `resolve_visibility(client,&Paths,&AppDefinition) -> Result<AppDefinition,String>`, `public_export(client,&[AppDefinition]) -> Result<Catalog,String>`.
 - `artwork.rs`: `load(client,&Paths,&AppDefinition,url:&str) -> Result<Option<String>,String>`(data:image base64 응답). 비공개 이미지는 메모리만 사용하며 토큰을 프런트엔드에 전달하지 않습니다.
 - `install.rs`: `find_installed(&Paths,&AppDefinition) -> Result<Option<InstalledApp>,String>`, `is_running(&InstalledApp)->bool`, `launch(&InstalledApp)`, `install(client,&Paths,&AppDefinition,&AppRelease,cancel:Arc<AtomicBool>,progress:Arc<dyn Fn(InstallProgress)+Send+Sync>) -> Result<InstalledApp,String>`.
-- `download.rs`: 설치 모듈 소유, GitHub 다운로드·체크섬 검증·취소·크기 제한 공통 처리.
-- `self_update.rs`: 설치 모듈 소유, `prepare(client,&Paths,&AppRelease,cancel,progress) -> Result<PreparedUpdate,String>`, `handoff(&Paths,&PreparedUpdate,background:bool)->Result<(),String>`, `run_helper(plan:&Path)->Result<(),String>`. handoff 성공 후 root가 앱 종료. helper 실행 전·부모 종료 후 해시 재확인, 파일 백업/실패 복구/동일 경로 재시작.
-- `platform.rs`와 `lib.rs`, `main.rs`: root 소유. Win32 트레이/시작 등록/단일 인스턴스/알림 클릭 및 Tauri 명령·작업 상태/주기 확인 관리.
+- `download.rs`: GitHub 다운로드·체크섬 검증·취소·크기 제한 공통 처리.
+- `self_update.rs`: `prepare(client,&Paths,&AppRelease,cancel,progress) -> Result<PreparedUpdate,String>`, `handoff(&Paths,&PreparedUpdate,background:bool)->Result<(),String>`, `run_helper(plan:&Path)->Result<(),String>`. handoff 성공 후 런타임이 앱 종료. helper 실행 전·부모 종료 후 해시 재확인, 파일 백업/실패 복구/동일 경로 재시작.
+- `platform.rs`, `runtime.rs`, `lib.rs`, `main.rs`: Windows 시작 등록·단일 인스턴스, 트레이·알림 클릭 및 Tauri 명령·작업 상태·주기 확인 관리.
 
 ## 경계
 
