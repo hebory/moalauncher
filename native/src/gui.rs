@@ -749,12 +749,14 @@ impl NativeApp {
 
     fn settings(&mut self, ui: &mut egui::Ui) {
         ui.set_max_width(800.0);
+        let panel_width = (ui.available_width() - 40.0).max(250.0);
         ui.label(RichText::new("MAKE IT YOURS").size(10.0).color(MUTED));
         ui.label(RichText::new("설정").size(26.0).strong());
         ui.label(RichText::new("모아 런처를 내 작업 방식에 맞춰 보세요.").color(MUTED));
         ui.add_space(24.0);
         panel().show(ui, |ui| {
             ui.heading("시작 및 종료"); ui.add_space(12.0);
+            ui.set_min_width(panel_width);
             let mut startup = self.snapshot.startup_enabled;
             if ui.checkbox(&mut startup, "Windows 시작 시 자동 실행").changed() { let result = self.engine.set_startup(startup); self.report(result); self.snapshot = self.engine.snapshot(); }
             ui.label(RichText::new("로그인하면 창 없이 트레이에서 시작합니다.").small().color(MUTED));
@@ -763,6 +765,7 @@ impl NativeApp {
         ui.add_space(16.0);
         panel().show(ui, |ui| {
             ui.heading("업데이트 확인");
+            ui.set_min_width(panel_width);
             ui.add_space(12.0);
             let mut startup = self.snapshot.settings.check_on_startup;
             if ui
@@ -813,6 +816,7 @@ impl NativeApp {
         ui.add_space(16.0);
         panel().show(ui, |ui| {
             ui.horizontal(|ui| { ui.heading("GitHub 연결"); ui.colored_label(PURPLE, if self.snapshot.github_connected { "연결됨" } else { "연결 안 됨" }); });
+            ui.set_min_width(panel_width);
             ui.label(RichText::new("인증 정보는 이 PC의 Windows 자격 증명 관리자에 보관합니다.").small().color(MUTED));
             ui.add_space(8.0); ui.add(egui::TextEdit::singleline(&mut self.password).password(true).hint_text("GitHub 개인 액세스 토큰").desired_width(f32::INFINITY));
             ui.label(RichText::new("Fine-grained 토큰에서 사용할 저장소를 선택하고 Contents: Read-only 권한을 지정하세요.").small().color(MUTED));
@@ -826,6 +830,7 @@ impl NativeApp {
         ui.add_space(16.0);
         panel().show(ui, |ui| {
             ui.heading("프로그램과 데이터"); ui.label(RichText::new(&self.snapshot.data_directory).small().color(MUTED));
+            ui.set_min_width(panel_width);
             ui.horizontal_wrapped(|ui| {
                 if ui.button("데이터 폴더").clicked() { let result = self.engine.open_location(None); self.report(result); }
                 if ui.add_enabled(!self.busy(), egui::Button::new("카탈로그 가져오기")).clicked() && let Some(path) = rfd::FileDialog::new().add_filter("앱 카탈로그", &["json"]).pick_file() { self.error.clear(); self.catalog_pending = true; let result = self.engine.preview_import(path); self.report(result); }
