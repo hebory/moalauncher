@@ -1,11 +1,15 @@
 pub mod artwork;
 pub mod credentials;
 pub mod download;
+pub mod engine;
 pub mod github;
+mod gui;
 pub mod install;
+mod library;
 pub mod models;
 mod platform;
 mod runtime;
 pub mod self_update;
 pub mod storage;
+mod windows;
 pub use runtime::run;
