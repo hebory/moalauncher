@@ -142,7 +142,7 @@ foreach ($kind in @('nsis', 'inno')) {
 $previous = $env:MOALAUNCHER_RUST_INSTALL_FIXTURE_ROOT
 try {
     $env:MOALAUNCHER_RUST_INSTALL_FIXTURE_ROOT = $fixtureRoot
-    & cargo test --manifest-path (Join-Path $repositoryRoot 'src-tauri/Cargo.toml') installer_fixtures_install_update_and_preserve_state_after_failure -- --nocapture
+    & cargo test --manifest-path (Join-Path $repositoryRoot 'src-tauri/Cargo.toml') installer_fixtures_install_update_and_preserve_state_after_failure -- --ignored --nocapture
     if ($LASTEXITCODE -ne 0) { throw 'Rust NSIS/Inno installation and update fixture tests failed.' }
 }
 finally {

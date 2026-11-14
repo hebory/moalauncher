@@ -663,7 +663,11 @@ async fn install_executable(
         if p.contains('"') || p.chars().any(char::is_control) {
             return Err("NSIS 설치 폴더 경로가 올바르지 않습니다.".into());
         }
-        cmd.arg("/S").arg(format!("/D={p}"));
+        cmd.arg("/S");
+        // NSIS parses `/D=` from the raw command line; it must be the final,
+        // unquoted argument even when the target path contains spaces.
+        use std::os::windows::process::CommandExt;
+        cmd.raw_arg(format!("/D={p}"));
     }
     report(app, "설치 중", 0, None, cb);
     let status = tokio::task::spawn_blocking(move || cmd.status())
@@ -876,7 +880,7 @@ mod tests {
             install_directory: if kind == "zip" {
                 None
             } else {
-                Some(format!("Programs/MoaFixture-{kind}"))
+                Some(format!("Programs/Moa Fixture-{kind}"))
             },
         }
     }
@@ -980,12 +984,12 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "실제 NSIS/Inno 설치기 fixture와 MOALAUNCHER_RUST_INSTALL_FIXTURE_ROOT가 필요합니다."]
     fn installer_fixtures_install_update_and_preserve_state_after_failure() {
-        let Some(fixture_root) =
-            std::env::var_os("MOALAUNCHER_RUST_INSTALL_FIXTURE_ROOT").map(PathBuf::from)
-        else {
-            return;
-        };
+        let fixture_root = PathBuf::from(
+            std::env::var_os("MOALAUNCHER_RUST_INSTALL_FIXTURE_ROOT")
+                .expect("MOALAUNCHER_RUST_INSTALL_FIXTURE_ROOT가 필요합니다."),
+        );
         let run_root = fixture_root
             .join("runs")
             .join(uuid::Uuid::new_v4().simple().to_string());
