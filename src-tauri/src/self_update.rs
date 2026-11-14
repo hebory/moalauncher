@@ -242,9 +242,8 @@ pub fn handoff(paths: &Paths, update: &PreparedUpdate, background: bool) -> Resu
     {
         return Err("런처 설치 파일 경로가 올바르지 않습니다.".into());
     }
-    if !constant_eq(&hash(&update.installer_path)?, &update.sha256) {
-        return Err("handoff 전 런처 설치 파일 SHA-256 검증에 실패했습니다.".into());
-    }
+    validate_installer_hash(&update.installer_path, &update.sha256)
+        .map_err(|_| "handoff 전 런처 설치 파일 SHA-256 검증에 실패했습니다.".to_owned())?;
     let current =
         std::env::current_exe().map_err(|_| "현재 런처 실행 파일을 확인하지 못했습니다.")?;
     let pid = std::process::id();
@@ -333,26 +332,21 @@ pub fn run_helper(plan_path: &Path) -> Result<(), String> {
     let target = canonical(Path::new(&plan.target))?;
     let installer = canonical(Path::new(&plan.installer))?;
     let job = plan_path.parent().ok_or("작업 폴더가 없습니다.")?;
-    let runner = canonical(
-        &std::env::current_exe()
-            .map_err(|_| "helper 경로를 확인하지 못했습니다.")?
-            .parent()
-            .ok_or("helper 폴더가 없습니다.")?,
-    )?;
-    if job.parent() != Some(canonical(&data.join("self-update"))?.as_path())
-        || runner != job.join("runner")
-        || installer.parent() != Some(job)
-        || !installer_name(installer.file_name().and_then(|x| x.to_str()).unwrap_or(""))
-    {
-        return Err("helper 경로 검증에 실패했습니다.".into());
-    }
+    let helper_exe = std::env::current_exe().map_err(|_| "helper 경로를 확인하지 못했습니다.")?;
+    let runner = canonical(helper_exe.parent().ok_or("helper 폴더가 없습니다.")?)?;
+    validate_helper_layout(&plan_path, &data, &installer, &runner)?;
     validate_target(&target)?;
     reject_reparse(&data)?;
     reject_reparse(&target)?;
     reject_reparse(&installer)?;
-    if !constant_eq(&hash(&installer)?, &plan.sha256) {
-        return Err("helper 실행 후 설치 파일의 SHA-256 검증에 실패했습니다.".into());
+    if within(&target, &data) || within(&data, &target) {
+        return Err("런처 설치 폴더와 데이터 폴더가 겹칩니다.".into());
     }
+    if normalize_tag(&plan.version)? != plan.version {
+        return Err("자체 업데이트 버전 형식이 올바르지 않습니다.".into());
+    }
+    validate_installer_hash(&installer, &plan.sha256)
+        .map_err(|_| "helper 실행 후 설치 파일의 SHA-256 검증에 실패했습니다.".to_owned())?;
     validate_parent(&plan)?;
     let ready = job.join("helper.ready");
     write_new(&ready, std::process::id().to_string().as_bytes())?;
@@ -367,7 +361,7 @@ pub fn run_helper(plan_path: &Path) -> Result<(), String> {
         return Err("런처 종료 대기 시간이 초과되었습니다.".into());
     }
     // Verify the staged package a second time after the original launcher has exited.
-    if !constant_eq(&hash(&installer)?, &plan.sha256) {
+    if validate_installer_hash(&installer, &plan.sha256).is_err() {
         write_result(
             &data,
             false,
@@ -501,6 +495,29 @@ fn installer_name(n: &str) -> bool {
         && n.bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'+' || b == b'-')
 }
+fn validate_installer_hash(path: &Path, expected: &str) -> Result<(), String> {
+    if expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("SHA-256 형식이 올바르지 않습니다.".into());
+    }
+    if !constant_eq(&hash(path)?, expected) {
+        return Err("설치 파일의 SHA-256 검증에 실패했습니다.".into());
+    }
+    Ok(())
+}
+fn validate_helper_layout(plan_path: &Path, data: &Path, installer: &Path, runner: &Path) -> Result<(), String> {
+    let job = plan_path.parent().ok_or("작업 폴더가 없습니다.")?;
+    let self_update = canonical(&data.join("self-update"))?;
+    if plan_path.file_name().and_then(|n| n.to_str()) != Some("plan.json")
+        || job.parent() != Some(self_update.as_path())
+        || uuid::Uuid::parse_str(job.file_name().and_then(|n| n.to_str()).unwrap_or("")).is_err()
+        || runner != job.join("runner")
+        || installer.parent() != Some(job)
+        || !installer_name(installer.file_name().and_then(|n| n.to_str()).unwrap_or(""))
+    {
+        return Err("helper 경로 검증에 실패했습니다.".into());
+    }
+    Ok(())
+}
 fn current_target() -> Result<PathBuf, String> {
     let p = std::env::current_exe().map_err(|_| "현재 런처 경로를 확인하지 못했습니다.")?;
     if p.file_name().and_then(|x| x.to_str()) != Some(EXE) {
@@ -610,6 +627,21 @@ fn write_new(p: &Path, b: &[u8]) -> Result<(), String> {
         .map_err(|_| "업데이트 파일을 저장하지 못했습니다.")
         .map_err(str::to_owned)
 }
+#[cfg(windows)]
+fn process_start(pid: u32) -> Option<u64> {
+    use windows_sys::Win32::{Foundation::{CloseHandle, FILETIME}, System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION}};
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if handle.is_null() { return None; }
+    let mut created = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+    let mut exited = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+    let mut kernel = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+    let mut user = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+    let ok = unsafe { GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user) };
+    unsafe { CloseHandle(handle); }
+    if ok == 0 { return None; }
+    Some((u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
+}
+#[cfg(not(windows))]
 fn process_start(pid: u32) -> Option<u64> {
     let mut s = sysinfo::System::new();
     s.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
@@ -622,10 +654,9 @@ fn validate_parent(p: &Plan) -> Result<(), String> {
     let parent = s
         .process(sysinfo::Pid::from_u32(p.parent_pid))
         .ok_or("handoff 런처 프로세스를 확인할 수 없습니다.")?;
-    if parent.start_time() != p.parent_started
-        || parent
-            .exe()
-            .is_none_or(|e| canonical(e).ok().as_deref() != Some(Path::new(&p.parent_exe)))
+    if process_start(p.parent_pid) != Some(p.parent_started)
+        || parent.exe().and_then(|e| canonical(e).ok()).as_deref()
+            != canonical(Path::new(&p.parent_exe)).ok().as_deref()
     {
         return Err("handoff 런처 프로세스가 일치하지 않습니다.".into());
     }
@@ -636,8 +667,8 @@ fn wait_parent(p: &Plan) -> bool {
     while std::time::Instant::now() < until {
         let mut s = sysinfo::System::new();
         s.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-        if s.process(sysinfo::Pid::from_u32(p.parent_pid))
-            .is_none_or(|x| x.start_time() != p.parent_started)
+        if s.process(sysinfo::Pid::from_u32(p.parent_pid)).is_none()
+            || process_start(p.parent_pid) != Some(p.parent_started)
         {
             return true;
         }
@@ -767,5 +798,63 @@ impl HiddenProcess for Command {
             self.creation_flags(0x08000000);
         }
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_root() -> PathBuf {
+        let root = std::env::temp_dir().join(format!("moa-helper-test-{}", uuid::Uuid::new_v4().simple()));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn helper_rejects_bad_installer_hashes_and_job_paths() {
+        let root = temp_root();
+        let data = root.join("data");
+        let job = data.join("self-update").join(uuid::Uuid::new_v4().simple().to_string());
+        let runner = job.join("runner");
+        fs::create_dir_all(&runner).unwrap();
+        let installer = job.join("MoaLauncher-1.2.3-Setup-x64.exe");
+        fs::write(&installer, b"fixture installer bytes").unwrap();
+        let plan = job.join("plan.json");
+        assert!(validate_helper_layout(&plan, &data, &installer, &runner).is_ok());
+        assert!(validate_helper_layout(&plan, &data, &installer, &root).is_err());
+        let digest = hash(&installer).unwrap();
+        assert!(validate_installer_hash(&installer, &digest).is_ok());
+        assert!(validate_installer_hash(&installer, &"0".repeat(64)).is_err());
+        assert!(validate_installer_hash(&installer, "not-a-sha256").is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn installer_filename_and_release_version_are_restricted() {
+        assert!(installer_name("MoaLauncher-1.2.3-Setup-x64.exe"));
+        assert!(!installer_name("MoaLauncher-1.2.3-Setup-x64.exe.exe"));
+        assert_eq!(normalize_tag("v1.2.3-rc.1+build").unwrap(), "1.2.3-rc.1+build");
+        assert!(normalize_tag("../../other.exe").is_err());
+    }
+
+    #[test]
+    fn helper_accepts_only_the_original_parent_process_identity() {
+        let exe = std::env::current_exe().unwrap();
+        let plan = Plan {
+            target: exe.parent().unwrap().to_string_lossy().into_owned(),
+            data: std::env::temp_dir().to_string_lossy().into_owned(),
+            installer: String::new(),
+            sha256: String::new(),
+            version: "1.0.0".into(),
+            parent_pid: std::process::id(),
+            parent_started: process_start(std::process::id()).unwrap(),
+            parent_exe: exe.to_string_lossy().into_owned(),
+            background: false,
+        };
+        assert!(validate_parent(&plan).is_ok());
+        let mut forged = plan;
+        forged.parent_pid = 0;
+        assert!(validate_parent(&forged).is_err());
     }
 }

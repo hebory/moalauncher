@@ -72,7 +72,7 @@ fn safe_relative(root: &Path, relative: &str) -> Result<PathBuf, String> {
     if relative
         .replace('\\', "/")
         .split('/')
-        .any(|part| part.ends_with([' ', '.']) || is_reserved_windows_name(part))
+        .any(|part| part.is_empty() || part.ends_with([' ', '.']) || is_reserved_windows_name(part))
     {
         return Err("패키지 경로에 Windows에서 사용할 수 없는 이름이 있습니다.".into());
     }
@@ -88,18 +88,15 @@ fn version_tag(tag: &str) -> Result<String, String> {
     }
     Ok(value.to_owned())
 }
-fn package_for(app: &AppDefinition) -> Result<&PackageDefinition, String> {
-    let arch = if cfg!(target_arch = "x86_64") {
-        "x64"
-    } else if cfg!(target_arch = "aarch64") {
-        "arm64"
-    } else {
-        "x86"
-    };
+fn package_for_arch(app: &AppDefinition, arch: &str) -> Result<&PackageDefinition, String> {
     app.packages
         .iter()
         .find(|p| p.architecture.eq_ignore_ascii_case(arch))
         .ok_or_else(|| format!("이 앱은 {arch} 프로세서를 지원하지 않습니다."))
+}
+fn package_for(app: &AppDefinition) -> Result<&PackageDefinition, String> {
+    let arch = if cfg!(target_arch = "x86_64") { "x64" } else if cfg!(target_arch = "aarch64") { "arm64" } else { "x86" };
+    package_for_arch(app, arch)
 }
 pub(crate) fn wildcard_match(pattern: &str, name: &str) -> bool {
     // Small glob matcher: only `*` and `?`, case-insensitive, no path semantics.
@@ -390,6 +387,8 @@ fn constant_eq(a: &str, b: &str) -> bool {
     };
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |x, (l, r)| x | (l ^ r)) == 0
 }
+// Keep repository visibility, token, cancellation and progress explicit at the download boundary.
+#[allow(clippy::too_many_arguments)]
 async fn expected_sha256(
     client: &reqwest::Client,
     paths: &Paths,
@@ -534,22 +533,9 @@ async fn extract_zip(
                 .map_err(|_| "ZIP 항목을 읽지 못했습니다.")?;
             let raw_name = entry.name().replace('\\', "/");
             let directory = entry.is_dir() || raw_name.ends_with('/');
-            let name = if directory {
-                raw_name.trim_end_matches('/').to_owned()
-            } else {
-                raw_name
-            };
-            if name.is_empty() {
+            let Some(name) = archive_entry_name(&raw_name, directory)? else {
                 continue;
-            }
-            if name.starts_with('/') || name.contains(':') {
-                return Err("ZIP에 허용되지 않은 경로가 있습니다.");
-            }
-            if name.split('/').any(|part| {
-                part.is_empty() || part.ends_with([' ', '.']) || is_reserved_windows_name(part)
-            }) {
-                return Err("ZIP에 Windows에서 사용할 수 없는 파일 이름이 있습니다.");
-            }
+            };
             let relative = Path::new(&name);
             if relative
                 .components()
@@ -558,33 +544,20 @@ async fn extract_zip(
                 return Err("ZIP 경로가 설치 폴더를 벗어납니다.");
             }
             let dest = stage.join(relative);
-            let key = crate::storage::normalize_path(&dest);
-            if !names.insert(key) {
-                return Err("ZIP 파일에 중복 경로가 있습니다.");
-            }
-            let mode = entry.unix_mode().unwrap_or(0) & 0o170000;
-            if mode == 0o120000 || (entry.unix_mode().unwrap_or(0) & 0o6000) != 0 {
-                return Err("ZIP 심볼릭 링크나 특수 파일은 허용되지 않습니다.");
-            }
+            register_zip_path(&mut names, &dest)?;
+            use zip::HasZipMetadata;
+            validate_zip_metadata(entry.size(), entry.compressed_size(), entry.unix_mode().unwrap_or(0), entry.get_metadata().external_attributes)?;
             if directory {
                 fs::create_dir_all(&dest).map_err(|_| "ZIP 폴더를 만들지 못했습니다.")?;
                 reject_reparse_path(&dest)
                     .map_err(|_| "ZIP 경로에 링크 또는 재분석 지점이 있습니다.")?;
                 continue;
             }
-            if entry.size() > MAX_ENTRY {
-                return Err("ZIP 항목 크기가 허용 범위를 초과했습니다.");
-            }
             expanded = expanded
                 .checked_add(entry.size())
                 .ok_or("ZIP 크기가 올바르지 않습니다.")?;
             if expanded > MAX_EXPANDED {
                 return Err("ZIP 압축 해제 크기가 허용 범위를 초과했습니다.");
-            }
-            if (entry.size() > 0 && entry.compressed_size() == 0)
-                || (entry.compressed_size() > 0 && entry.size() / entry.compressed_size() > 500)
-            {
-                return Err("ZIP 압축 비율이 허용 범위를 초과했습니다.");
             }
             let parent = dest.parent().ok_or("ZIP 파일 경로가 올바르지 않습니다.")?;
             fs::create_dir_all(parent).map_err(|_| "ZIP 폴더를 만들지 못했습니다.")?;
@@ -676,6 +649,7 @@ async fn install_executable(
         }
         cmd.arg("/S").arg(format!("/D={p}"));
     }
+    report(app, "설치 중", 0, None, cb);
     let status = tokio::task::spawn_blocking(move || cmd.status())
         .await
         .map_err(|_| "설치 프로그램 작업이 중단되었습니다.")?
@@ -731,6 +705,35 @@ fn is_reserved_windows_name(part: &str) -> bool {
         || (stem.len() == 4
             && (stem.starts_with("COM") || stem.starts_with("LPT"))
             && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+}
+fn archive_entry_name(raw: &str, directory: bool) -> Result<Option<String>, &'static str> {
+    if raw.starts_with('/') || raw.contains(':') || (directory && raw.ends_with("//")) {
+        return Err("ZIP에 허용되지 않은 경로가 있습니다.");
+    }
+    let name = if directory { raw.trim_end_matches('/').to_owned() } else { raw.to_owned() };
+    if name.is_empty() { return Ok(None); }
+    if name.split('/').any(|part| part.is_empty() || part.ends_with([' ', '.']) || is_reserved_windows_name(part)) {
+        return Err("ZIP에 Windows에서 사용할 수 없는 파일 이름이 있습니다.");
+    }
+    let relative = Path::new(&name);
+    if relative.components().any(|c| !matches!(c, Component::Normal(_))) {
+        return Err("ZIP 경로가 설치 폴더를 벗어납니다.");
+    }
+    Ok(Some(name))
+}
+fn register_zip_path(names: &mut HashSet<String>, path: &Path) -> Result<(), &'static str> {
+    if names.insert(crate::storage::normalize_path(path)) { Ok(()) } else { Err("ZIP 파일에 중복 경로가 있습니다.") }
+}
+fn validate_zip_metadata(size: u64, compressed: u64, unix_mode: u32, external_attributes: u32) -> Result<(), &'static str> {
+    let file_type = unix_mode & 0o170000;
+    if file_type == 0o120000 || (unix_mode & 0o6000) != 0 || (external_attributes & 0x400) != 0 {
+        return Err("ZIP 심볼릭 링크나 재분석 지점은 허용되지 않습니다.");
+    }
+    if size > MAX_ENTRY { return Err("ZIP 항목 크기가 허용 범위를 초과했습니다."); }
+    if (size > 0 && compressed == 0) || (compressed > 0 && size / compressed > 500) {
+        return Err("ZIP 압축 비율이 허용 범위를 초과했습니다.");
+    }
+    Ok(())
 }
 fn reject_reparse_path(path: &Path) -> Result<(), String> {
     let full = path.to_path_buf();
@@ -819,4 +822,93 @@ pub(crate) fn read_product_version(path: &Path) -> Option<String> {
 #[cfg(not(windows))]
 pub(crate) fn read_product_version(_path: &Path) -> Option<String> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn package(kind: &str) -> PackageDefinition {
+        PackageDefinition {
+            architecture: "x64".into(),
+            kind: kind.into(),
+            asset_pattern: "MoaFixture-*-x64.exe".into(),
+            executable_path: "MoaFixture.exe".into(),
+            install_directory: if kind == "zip" { None } else { Some(format!("Programs/MoaFixture-{kind}")) },
+        }
+    }
+    fn definition(kind: &str) -> AppDefinition {
+        AppDefinition { id: format!("fixture-{kind}"), name: "fixture".into(), packages: vec![package(kind)], ..Default::default() }
+    }
+    fn release(tag: &str) -> AppRelease {
+        AppRelease { tag: tag.into(), name: tag.into(), notes: String::new(), page_url: String::new(), published_at: String::new(), assets: vec![], is_private: false }
+    }
+    fn callback() -> Arc<dyn Fn(InstallProgress)+Send+Sync> { Arc::new(|_| {}) }
+
+    #[test]
+    fn wildcard_selection_architecture_and_version_rules_are_exact() {
+        let package = package("zip");
+        let mut release = release("v1.2.3");
+        release.assets.push(ReleaseAsset { name:"MoaFixture-1.2.3-x64.exe".into(), download_url:String::new(), size:1, sha256:None, api_url:None });
+        assert_eq!(select_asset(&release, &package).unwrap().name, "MoaFixture-1.2.3-x64.exe");
+        release.assets.push(ReleaseAsset { name:"MoaFixture-1.2.4-x64.exe".into(), download_url:String::new(), size:1, sha256:None, api_url:None });
+        assert!(select_asset(&release, &package).is_err());
+        assert!(package_for_arch(&definition("zip"), "x64").is_ok());
+        assert!(package_for_arch(&definition("zip"), "arm64").is_err());
+        assert_eq!(version_tag("v1.2.3-rc.1+build.4").unwrap(), "1.2.3-rc.1+build.4");
+        assert!(version_tag("v1/2/3").is_err());
+    }
+
+    #[test]
+    fn package_paths_reject_traversal_reserved_names_ads_and_empty_segments() {
+        let root = Path::new("C:/fixture");
+        assert!(safe_relative(root, "bin/Moa.exe").is_ok());
+        for invalid in ["../Moa.exe", "folder//Moa.exe", "NUL.exe", "CON", "folder./Moa.exe", "file.exe:stream", "C:/outside.exe"] {
+            assert!(safe_relative(root, invalid).is_err(), "accepted {invalid}");
+        }
+    }
+
+    #[test]
+    fn zip_entry_validation_rejects_duplicates_links_reparse_and_expansion_limits() {
+        assert_eq!(archive_entry_name("bin/", true).unwrap(), Some("bin".into()));
+        assert!(archive_entry_name("/root/", true).is_err());
+        assert!(archive_entry_name("folder//", true).is_err());
+        assert!(archive_entry_name("../outside.exe", false).is_err());
+        assert!(archive_entry_name("folder//file.exe", false).is_err());
+        let mut names = HashSet::new();
+        register_zip_path(&mut names, Path::new("C:/stage/app.exe")).unwrap();
+        assert!(register_zip_path(&mut names, Path::new("C:/STAGE/app.exe")).is_err());
+        assert!(validate_zip_metadata(10, 10, 0o120000, 0).is_err());
+        assert!(validate_zip_metadata(10, 10, 0, 0x400).is_err());
+        assert!(validate_zip_metadata(MAX_ENTRY + 1, 1, 0, 0).is_err());
+        assert!(validate_zip_metadata(100_000, 1, 0, 0).is_err());
+        assert!(validate_zip_metadata(10, 10, 0, 0).is_ok());
+    }
+
+    #[test]
+    fn installer_fixtures_install_update_and_preserve_state_after_failure() {
+        let Some(fixture_root) = std::env::var_os("MOALAUNCHER_RUST_INSTALL_FIXTURE_ROOT").map(PathBuf::from) else { return; };
+        let run_root = fixture_root.join("runs").join(uuid::Uuid::new_v4().simple().to_string());
+        fs::create_dir_all(&run_root).unwrap();
+        let paths = Paths { data_dir:run_root.join("data"), local_app_data:run_root.join("local") };
+        fs::create_dir_all(&paths.data_dir).unwrap();
+        fs::create_dir_all(&paths.local_app_data).unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        for kind in ["nsis", "inno"] {
+            let app = definition(kind);
+            let progress = callback();
+            for version in ["1.0.0", "1.1.0"] {
+                let installer = fixture_root.join("installers").join(format!("setup-{kind}-{version}.exe"));
+                assert!(installer.is_file(), "fixture installer is missing: {}", installer.display());
+                let result = runtime.block_on(install_executable(&paths, &app, &release(version), &app.packages[0], &installer, progress.as_ref(), &AtomicBool::new(false)));
+                assert_eq!(result.unwrap().version, version);
+            }
+            let failure = fixture_root.join("installers").join(format!("setup-{kind}-failure.exe"));
+            assert!(failure.is_file(), "failure fixture is missing: {}", failure.display());
+            let result = runtime.block_on(install_executable(&paths, &app, &release("1.2.0"), &app.packages[0], &failure, progress.as_ref(), &AtomicBool::new(false)));
+            assert!(result.is_err());
+            let installed = find_installed(&paths, &app).unwrap().expect("업데이트 전 설치 상태가 남아 있어야 합니다.");
+            assert_eq!(installed.version, "1.1.0");
+        }
+    }
 }

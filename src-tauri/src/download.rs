@@ -4,12 +4,13 @@ use crate::models::{InstallProgress, ReleaseAsset};
 use reqwest::{header, StatusCode, Url};
 use sha2::{Digest, Sha256};
 use std::{
+    future::Future,
     path::Path,
     sync::atomic::{AtomicBool, Ordering},
 };
 use tokio::{
     io::AsyncWriteExt,
-    time::{timeout, Duration},
+    time::Duration,
 };
 
 pub(super) const MAX_PACKAGE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
@@ -41,6 +42,18 @@ fn cancelled(cancel: &AtomicBool) -> Result<(), String> {
         Ok(())
     }
 }
+async fn await_or_cancel<T, F>(cancel: &AtomicBool, future: F, failure: &'static str) -> Result<T, String>
+where
+    F: Future<Output = Result<T, reqwest::Error>>,
+{
+    tokio::pin!(future);
+    loop {
+        tokio::select! {
+            response = &mut future => return response.map_err(|_| failure.to_owned()),
+            _ = tokio::time::sleep(Duration::from_millis(50)) => cancelled(cancel)?,
+        }
+    }
+}
 fn redirect(status: StatusCode) -> bool {
     matches!(
         status,
@@ -51,7 +64,7 @@ fn redirect(status: StatusCode) -> bool {
             | StatusCode::PERMANENT_REDIRECT
     )
 }
-fn allowed_uri(url: &Url) -> bool {
+pub(super) fn allowed_uri(url: &Url) -> bool {
     url.scheme() == "https"
         && url.username().is_empty()
         && url.password().is_none()
@@ -88,10 +101,7 @@ async fn get_anonymous(
             .timeout(Duration::from_secs(600))
             .build()
             .map_err(|_| "다운로드 요청을 만들지 못했습니다.")?;
-        let response = timeout(Duration::from_secs(600), client.execute(req))
-            .await
-            .map_err(|_| "다운로드 시간이 초과되었습니다.")?
-            .map_err(|_| "릴리스 파일을 다운로드하지 못했습니다.")?;
+        let response = await_or_cancel(cancel, client.execute(req), "릴리스 파일 다운로드가 중단되었습니다.").await?;
         if redirect(response.status()) {
             if hop == MAX_REDIRECTS {
                 return Err("GitHub 다운로드 리디렉션 횟수가 허용 범위를 초과했습니다.".into());
@@ -122,6 +132,8 @@ async fn get_anonymous(
     Err("다운로드를 완료하지 못했습니다.".into())
 }
 
+// The security boundary parameters stay explicit so callers cannot accidentally infer trust.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn download_asset(
     client: &reqwest::Client,
     asset: &ReleaseAsset,
@@ -154,8 +166,7 @@ pub(super) async fn download_asset(
         return Err("GitHub 인증 정보 형식이 올바르지 않습니다.".into());
     }
     cancelled(cancel)?;
-    let response = timeout(
-        Duration::from_secs(600),
+    let response = await_or_cancel(cancel,
         client
             .get(api)
             .timeout(Duration::from_secs(600))
@@ -163,12 +174,9 @@ pub(super) async fn download_asset(
             .header(header::ACCEPT, "application/octet-stream")
             .header("X-GitHub-Api-Version", "2022-11-28")
             .send(),
+        "비공개 릴리스 다운로드가 중단되었습니다.",
     )
-    .await
-    .map_err(|_| "비공개 릴리스 다운로드 시간이 초과되었습니다.".to_string())?
-    .map_err(|_| {
-        "비공개 릴리스 파일을 다운로드하지 못했습니다. 저장소 권한을 확인하세요.".to_string()
-    })?;
+    .await?;
     if response.url().as_str() != api {
         return Err("인증된 GitHub 요청이 예상하지 않은 주소로 리디렉션되었습니다.".into());
     }
@@ -228,12 +236,7 @@ async fn save_response(
     let result = async move {
         let mut hash = Sha256::new();
         let mut bytes = 0u64;
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| "릴리스 파일 다운로드 중 연결이 끊겼습니다.")?
-        {
-            cancelled(cancel)?;
+        while let Some(chunk) = await_or_cancel(cancel,response.chunk(),"릴리스 파일 다운로드 중 연결이 끊겼습니다.").await? {
             bytes = bytes
                 .checked_add(chunk.len() as u64)
                 .ok_or("다운로드 파일 크기가 올바르지 않습니다.")?;
@@ -267,7 +270,7 @@ async fn save_response(
 
 pub(super) fn checksum_matches(text: &str, asset_name: &str) -> Option<String> {
     for line in text.lines() {
-        let mut fields = line.trim().split_whitespace();
+        let mut fields = line.split_whitespace();
         let Some(hash) = fields.next() else {
             continue;
         };
@@ -283,4 +286,78 @@ pub(super) fn checksum_matches(text: &str, asset_name: &str) -> Option<String> {
     let bare = text.trim();
     (bare.len() == 64 && bare.bytes().all(|b| b.is_ascii_hexdigit()))
         .then(|| bare.to_ascii_lowercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checksum_parser_ignores_empty_lines_and_requires_matching_name() {
+        let hash = "a".repeat(64);
+        assert_eq!(checksum_matches(&format!("\n{hash} *MoaView.zip\n"), "moaview.ZIP"), Some(hash));
+        assert_eq!(checksum_matches(&format!("{hash} other.zip\n"), "moaview.zip"), None);
+        assert_eq!(checksum_matches("not-a-checksum", "MoaView.zip"), None);
+    }
+
+    #[test]
+    fn redirect_allowlist_accepts_github_cdn_only() {
+        for url in [
+            "https://github.com/owner/repo/releases/download/v1/file.zip",
+            "https://objects.githubusercontent.com/release/item?sig=abc",
+            "https://release-assets.githubusercontent.com/file",
+            "https://github-releases.githubusercontent.com/file",
+        ] {
+            assert!(allowed_uri(&Url::parse(url).unwrap()), "{url}");
+        }
+        for url in [
+            "http://github.com/owner/repo/releases/download/v1/file.zip",
+            "https://evil.example/file",
+            "https://user@github.com/owner/repo/releases/download/v1/file.zip",
+            "https://github.com:444/owner/repo/releases/download/v1/file.zip",
+        ] {
+            assert!(!allowed_uri(&Url::parse(url).unwrap()), "{url}");
+        }
+    }
+
+    #[tokio::test]
+    async fn cancellation_interrupts_a_stalled_request() {
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let signal = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            signal.store(true, Ordering::SeqCst);
+        });
+        let result = await_or_cancel(&cancel, std::future::pending::<Result<(), reqwest::Error>>(), "취소됨").await;
+        assert_eq!(result.unwrap_err(), "작업이 취소되었습니다.");
+    }
+
+    #[tokio::test]
+    async fn cancelling_stream_removes_partial_download() {
+        use std::{io::{Read, Write}, net::TcpListener, thread};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request);
+            stream.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\nabc\r\n").unwrap();
+            stream.flush().unwrap();
+            thread::sleep(Duration::from_millis(400));
+            let _ = stream.write_all(b"3\r\ndef\r\n0\r\n\r\n");
+        });
+        let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+        let response = client.get(format!("http://{addr}/fixture")).send().await.unwrap();
+        let temp_root = std::env::temp_dir().join(format!("moa-cancel-{}", uuid::Uuid::new_v4().simple()));
+        tokio::fs::create_dir_all(&temp_root).await.unwrap();
+        let dest = temp_root.join("fixture.zip");
+        let cancel = AtomicBool::new(false);
+        let callback = |p: InstallProgress| { if p.bytes_received > 0 { cancel.store(true, Ordering::SeqCst); } };
+        let result = save_response(response, &dest, 1024, "fixture", &cancel, &callback).await;
+        assert!(result.is_err());
+        assert!(!dest.exists());
+        assert_eq!(std::fs::read_dir(&temp_root).unwrap().count(), 0);
+        server.join().unwrap();
+        tokio::fs::remove_dir(temp_root).await.unwrap();
+    }
 }
