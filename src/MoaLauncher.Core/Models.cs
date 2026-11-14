@@ -51,7 +51,7 @@ public sealed record LauncherSettings
     public bool CheckOnStartup { get; init; } = true;
     public bool PeriodicChecks { get; init; } = true;
     public bool UpdateNotifications { get; init; } = true;
-    public bool UseGridView { get; init; }
+    public bool UseGridView { get; init; } = true;
     private int checkIntervalMinutes = DefaultCheckIntervalMinutes;
     public int CheckIntervalMinutes
     {

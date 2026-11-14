@@ -21,7 +21,7 @@ internal static class LibraryViewChecks
 {
     private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
 
-    internal static async Task RunAsync(MainWindow window, bool leaveInGridView)
+    internal static async Task RunAsync(MainWindow window, bool expectedInitialGridView, bool leaveInGridView)
     {
         var listButton = GetField<RadioButton>(window, "ListViewButton");
         var gridButton = GetField<RadioButton>(window, "GridViewButton");
@@ -30,8 +30,11 @@ internal static class LibraryViewChecks
         var searchBox = GetField<TextBox>(window, "SearchBox");
         var viewCollection = visibleItems;
 
-        Require(listButton.IsChecked == true && gridButton.IsChecked != true,
-            "The initial library view was not the list layout.");
+        Require(gridButton.IsChecked == expectedInitialGridView && listButton.IsChecked == !expectedInitialGridView,
+            "The initial library view did not honor the grid default or saved list preference.");
+        Require(ReferenceEquals(GetField<ItemsControl>(window, "AppCards").ItemTemplate,
+                window.FindResource(expectedInitialGridView ? "GridAppTemplate" : "ListAppTemplate")),
+            "The initial card layout did not match the selected view.");
         Require(visibleItems.Count == items.Count,
             "The initial list did not show the full library.");
 
@@ -39,6 +42,9 @@ internal static class LibraryViewChecks
         var originalPeriodic = periodicCheck.IsChecked;
         var originalSettings = ReadSettings(window);
 
+        listButton.IsChecked = true;
+        await FlushLayoutAsync(window);
+        await WaitForSavedViewAsync(window, expected: false);
         gridButton.IsChecked = true;
         await FlushLayoutAsync(window);
         await WaitForSavedViewAsync(window, expected: true);

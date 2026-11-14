@@ -16,7 +16,7 @@ dotnet run --project src/MoaLauncher.App
 
 기본 카탈로그에는 [모아뷰](https://github.com/hebory/moaview), [MoaVCS](https://github.com/hebory/moavcs), [모아검색](https://github.com/hebory/moasearch)이 포함됩니다. 각 저장소의 공개 GitHub Releases에서 최신 안정 버전을 확인하고, `%LOCALAPPDATA%\Programs\MoaView`, `%LOCALAPPDATA%\Programs\moavcs`, `%LOCALAPPDATA%\Programs\moasearch`의 기존 설치를 인식합니다. 다른 프로그램은 **프로그램 추가**로 등록하거나 설정 화면에서 카탈로그 JSON을 가져오세요.
 
-검색창 옆의 **리스트 보기 / 그리드 보기** 버튼으로 프로그램 배치를 바꿀 수 있습니다. 기본값은 리스트이며 선택한 보기는 재실행해도 유지됩니다. 그리드에서는 창 너비에 따라 2~3열의 카드로 표시하며, 검색·필터와 설치·업데이트 기능은 두 보기에서 동일하게 사용할 수 있습니다.
+검색창 옆의 **리스트 보기 / 그리드 보기** 버튼으로 프로그램 배치를 바꿀 수 있습니다. 저장한 보기 설정이 없으면 기본값인 그리드로 시작하며, 기존에 선택한 리스트·그리드 보기는 그대로 유지됩니다. 그리드에서는 창 너비에 따라 2~3열의 카드로 표시하며, 검색·필터와 설치·업데이트 기능은 두 보기에서 동일하게 사용할 수 있습니다.
 
 각 프로그램의 공식 `icon.png`는 프로그램 목록과 상세 화면에, `cover.png`는 **그리드 보기**와 **상세 보기**에 표시합니다. 이미지 주소는 카탈로그의 선택 항목 `iconUrl`·`coverUrl`로 연결합니다. 이미지 다운로드가 실패하면 마지막 정상 캐시를 사용합니다. 캐시도 없으면 문자 아이콘과 색상 배경을 표시하고 상세 화면의 커버 영역은 접습니다.
 

@@ -31,9 +31,8 @@ internal static class Program
         var dataDirectory = Path.GetFullPath(Path.Combine(testDataRoot, "tray-smoke-" + Guid.NewGuid().ToString("N")));
         EnsureUnderTestData(testDataRoot, dataDirectory);
         Directory.CreateDirectory(dataDirectory);
-        WriteTestData(dataDirectory);
-
         var startsInBackground = args.Contains(WindowsStartupRegistration.BackgroundArgument, StringComparer.OrdinalIgnoreCase);
+        WriteTestData(dataDirectory, useSavedListView: startsInBackground);
         var app = new App();
         var startupRegistration = new FakeStartupRegistration();
         var updateChecks = new UpdateNotificationChecks();
@@ -181,7 +180,7 @@ internal static class Program
         openMenuItem.PerformClick();
         if (!window.IsVisible) throw new InvalidOperationException("Tray open menu action did not restore the window.");
 
-        await LibraryViewChecks.RunAsync(window, leaveInGridView: startsInBackground);
+        await LibraryViewChecks.RunAsync(window, expectedInitialGridView: !startsInBackground, leaveInGridView: startsInBackground);
         await updateChecks.RunAsync(app, window);
         await gitHubChecks.RunAsync(window, dataDirectory);
 
@@ -332,7 +331,7 @@ internal static class Program
         if (notifyIcon.Visible) throw new InvalidOperationException("NotifyIcon remained visible after app exit.");
     }
 
-    private static void WriteTestData(string dataDirectory)
+    private static void WriteTestData(string dataDirectory, bool useSavedListView)
     {
         File.WriteAllText(Path.Combine(dataDirectory, "catalog.json"), """
             {
@@ -354,8 +353,9 @@ internal static class Program
             }
             """);
 
-        File.WriteAllText(Path.Combine(dataDirectory, "settings.json"), """
-            { "checkOnStartup": false, "periodicChecks": true, "checkIntervalMinutes": 60 }
+        var savedView = useSavedListView ? ", \"useGridView\": false" : "";
+        File.WriteAllText(Path.Combine(dataDirectory, "settings.json"), $$"""
+            { "checkOnStartup": false, "periodicChecks": true, "checkIntervalMinutes": 60{{savedView}} }
             """);
     }
 

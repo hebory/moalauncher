@@ -15,7 +15,7 @@ public sealed class LauncherSettingsTests
         Assert.False(settings.CheckOnStartup);
         Assert.False(settings.PeriodicChecks);
         Assert.True(settings.UpdateNotifications);
-        Assert.False(settings.UseGridView);
+        Assert.True(settings.UseGridView);
     }
 
     [Fact]
@@ -25,9 +25,9 @@ public sealed class LauncherSettingsTests
     }
 
     [Fact]
-    public void NewSettingsKeepTheListViewByDefault()
+    public void NewSettingsUseTheGridViewByDefault()
     {
-        Assert.False(new LauncherSettings().UseGridView);
+        Assert.True(new LauncherSettings().UseGridView);
     }
 
     [Theory]

@@ -225,12 +225,12 @@
         </StackPanel>
         <Border Grid.Column="1" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="3" Margin="8,0,10,0">
           <StackPanel Orientation="Horizontal">
-            <RadioButton x:Name="ListViewButton" GroupName="LibraryViewMode" IsChecked="True" Checked="ViewMode_Changed"
+            <RadioButton x:Name="ListViewButton" GroupName="LibraryViewMode" Checked="ViewMode_Changed"
                          Style="{StaticResource ViewModeButton}" ToolTip="리스트 보기" AutomationProperties.Name="리스트 보기">
               <Path Data="M1,2 H15 M1,7 H15 M1,12 H15" Width="14" Height="12" StrokeThickness="1.5" Stretch="Fill"
                     Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
             </RadioButton>
-            <RadioButton x:Name="GridViewButton" GroupName="LibraryViewMode" Checked="ViewMode_Changed"
+            <RadioButton x:Name="GridViewButton" GroupName="LibraryViewMode" IsChecked="True" Checked="ViewMode_Changed"
                          Style="{StaticResource ViewModeButton}" ToolTip="그리드 보기" AutomationProperties.Name="그리드 보기">
               <Path Data="M0,0 H5 V5 H0 Z M9,0 H14 V5 H9 Z M0,9 H5 V14 H0 Z M9,9 H14 V14 H9 Z" Width="14" Height="14" StrokeThickness="1.2" Stretch="Uniform"
                     Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"/>
@@ -263,7 +263,7 @@
                       Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" Margin="0,14,0,0"/>
             </StackPanel>
           </Border>
-          <ItemsControl x:Name="AppCards" ItemTemplate="{StaticResource ListAppTemplate}" ItemsPanel="{StaticResource ListAppPanel}"/>
+          <ItemsControl x:Name="AppCards" ItemTemplate="{StaticResource GridAppTemplate}" ItemsPanel="{StaticResource GridAppPanel}"/>
         </StackPanel>
       </ScrollViewer>
     </Grid>
