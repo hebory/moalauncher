@@ -214,7 +214,9 @@ pub fn validate_catalog(catalog: &Catalog) -> Result<(), String> {
 }
 
 fn valid_text(s: &str, max: usize, required: bool) -> bool {
-    s.encode_utf16().count() <= max && (!required || !s.trim().is_empty()) && !s.chars().any(char::is_control)
+    s.encode_utf16().count() <= max
+        && (!required || !s.trim().is_empty())
+        && !s.chars().any(char::is_control)
 }
 
 fn safe_image_url(url: &str, repo: &str) -> bool {
@@ -228,7 +230,9 @@ fn safe_image_url(url: &str, repo: &str) -> bool {
         return false;
     };
     if uri.scheme() != "https"
-        || !uri.host_str().is_some_and(|host| host.eq_ignore_ascii_case("raw.githubusercontent.com"))
+        || !uri
+            .host_str()
+            .is_some_and(|host| host.eq_ignore_ascii_case("raw.githubusercontent.com"))
         || uri.port().is_some()
         || !uri.username().is_empty()
         || uri.password().is_some()
@@ -240,7 +244,10 @@ fn safe_image_url(url: &str, repo: &str) -> bool {
     let Some(segments) = uri.path_segments() else {
         return false;
     };
-    let Some(segments) = segments.map(decode_image_segment).collect::<Option<Vec<_>>>() else {
+    let Some(segments) = segments
+        .map(decode_image_segment)
+        .collect::<Option<Vec<_>>>()
+    else {
         return false;
     };
     if segments.len() < 4
@@ -262,7 +269,9 @@ fn safe_image_url(url: &str, repo: &str) -> bool {
         return false;
     }
     let last = segments.last().unwrap().to_ascii_lowercase();
-    [".png", ".jpg", ".jpeg"].iter().any(|extension| last.ends_with(extension))
+    [".png", ".jpg", ".jpeg"]
+        .iter()
+        .any(|extension| last.ends_with(extension))
 }
 
 fn decode_image_segment(segment: &str) -> Option<String> {
@@ -331,7 +340,7 @@ pub fn save_personal_catalog(paths: &Paths, catalog: &Catalog) -> Result<(), Str
 }
 
 pub fn load_catalog(paths: &Paths) -> Result<Catalog, String> {
-    let mut bundled: Catalog = serde_json::from_str(BUNDLED_CATALOG)
+    let bundled: Catalog = serde_json::from_str(BUNDLED_CATALOG)
         .map_err(|_| "기본 카탈로그를 읽지 못했습니다.".to_string())?;
     validate_catalog(&bundled)?;
     let personal = load_personal_catalog(paths)?;
@@ -359,7 +368,10 @@ pub fn load_catalog(paths: &Paths) -> Result<Catalog, String> {
         }
     }
     merged.retain(|app| app.id != "moa-launcher");
-    let result = Catalog { schema_version: 1, apps: merged };
+    let result = Catalog {
+        schema_version: 1,
+        apps: merged,
+    };
     validate_catalog(&result)?;
     Ok(result)
 }
@@ -520,6 +532,7 @@ fn replace_file(source: &Path, target: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::AppDefinition;
 
     fn app(id: &str, name: &str, repository: &str, icon_url: Option<&str>) -> AppDefinition {
         AppDefinition {

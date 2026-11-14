@@ -8,10 +8,7 @@ use std::{
     path::Path,
     sync::atomic::{AtomicBool, Ordering},
 };
-use tokio::{
-    io::AsyncWriteExt,
-    time::Duration,
-};
+use tokio::{io::AsyncWriteExt, time::Duration};
 
 pub(super) const MAX_PACKAGE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_REDIRECTS: usize = 5;
@@ -42,7 +39,11 @@ fn cancelled(cancel: &AtomicBool) -> Result<(), String> {
         Ok(())
     }
 }
-async fn await_or_cancel<T, F>(cancel: &AtomicBool, future: F, failure: &'static str) -> Result<T, String>
+async fn await_or_cancel<T, F>(
+    cancel: &AtomicBool,
+    future: F,
+    failure: &'static str,
+) -> Result<T, String>
 where
     F: Future<Output = Result<T, reqwest::Error>>,
 {
@@ -101,7 +102,12 @@ async fn get_anonymous(
             .timeout(Duration::from_secs(600))
             .build()
             .map_err(|_| "다운로드 요청을 만들지 못했습니다.")?;
-        let response = await_or_cancel(cancel, client.execute(req), "릴리스 파일 다운로드가 중단되었습니다.").await?;
+        let response = await_or_cancel(
+            cancel,
+            client.execute(req),
+            "릴리스 파일 다운로드가 중단되었습니다.",
+        )
+        .await?;
         if redirect(response.status()) {
             if hop == MAX_REDIRECTS {
                 return Err("GitHub 다운로드 리디렉션 횟수가 허용 범위를 초과했습니다.".into());
@@ -166,7 +172,8 @@ pub(super) async fn download_asset(
         return Err("GitHub 인증 정보 형식이 올바르지 않습니다.".into());
     }
     cancelled(cancel)?;
-    let response = await_or_cancel(cancel,
+    let response = await_or_cancel(
+        cancel,
         client
             .get(api)
             .timeout(Duration::from_secs(600))
@@ -236,7 +243,13 @@ async fn save_response(
     let result = async move {
         let mut hash = Sha256::new();
         let mut bytes = 0u64;
-        while let Some(chunk) = await_or_cancel(cancel,response.chunk(),"릴리스 파일 다운로드 중 연결이 끊겼습니다.").await? {
+        while let Some(chunk) = await_or_cancel(
+            cancel,
+            response.chunk(),
+            "릴리스 파일 다운로드 중 연결이 끊겼습니다.",
+        )
+        .await?
+        {
             bytes = bytes
                 .checked_add(chunk.len() as u64)
                 .ok_or("다운로드 파일 크기가 올바르지 않습니다.")?;
@@ -295,8 +308,14 @@ mod tests {
     #[test]
     fn checksum_parser_ignores_empty_lines_and_requires_matching_name() {
         let hash = "a".repeat(64);
-        assert_eq!(checksum_matches(&format!("\n{hash} *MoaView.zip\n"), "moaview.ZIP"), Some(hash.clone()));
-        assert_eq!(checksum_matches(&format!("{hash} other.zip\n"), "moaview.zip"), None);
+        assert_eq!(
+            checksum_matches(&format!("\n{hash} *MoaView.zip\n"), "moaview.ZIP"),
+            Some(hash.clone())
+        );
+        assert_eq!(
+            checksum_matches(&format!("{hash} other.zip\n"), "moaview.zip"),
+            None
+        );
         assert_eq!(checksum_matches("not-a-checksum", "MoaView.zip"), None);
     }
 
@@ -328,13 +347,22 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
             signal.store(true, Ordering::SeqCst);
         });
-        let result = await_or_cancel(&cancel, std::future::pending::<Result<(), reqwest::Error>>(), "취소됨").await;
+        let result = await_or_cancel(
+            &cancel,
+            std::future::pending::<Result<(), reqwest::Error>>(),
+            "취소됨",
+        )
+        .await;
         assert_eq!(result.unwrap_err(), "작업이 취소되었습니다.");
     }
 
     #[tokio::test]
     async fn cancelling_stream_removes_partial_download() {
-        use std::{io::{Read, Write}, net::TcpListener, thread};
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+            thread,
+        };
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let server = thread::spawn(move || {
@@ -346,13 +374,25 @@ mod tests {
             thread::sleep(Duration::from_millis(400));
             let _ = stream.write_all(b"3\r\ndef\r\n0\r\n\r\n");
         });
-        let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
-        let response = client.get(format!("http://{addr}/fixture")).send().await.unwrap();
-        let temp_root = std::env::temp_dir().join(format!("moa-cancel-{}", uuid::Uuid::new_v4().simple()));
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let response = client
+            .get(format!("http://{addr}/fixture"))
+            .send()
+            .await
+            .unwrap();
+        let temp_root =
+            std::env::temp_dir().join(format!("moa-cancel-{}", uuid::Uuid::new_v4().simple()));
         tokio::fs::create_dir_all(&temp_root).await.unwrap();
         let dest = temp_root.join("fixture.zip");
         let cancel = AtomicBool::new(false);
-        let callback = |p: InstallProgress| { if p.bytes_received > 0 { cancel.store(true, Ordering::SeqCst); } };
+        let callback = |p: InstallProgress| {
+            if p.bytes_received > 0 {
+                cancel.store(true, Ordering::SeqCst);
+            }
+        };
         let result = save_response(response, &dest, 1024, "fixture", &cancel, &callback).await;
         assert!(result.is_err());
         assert!(!dest.exists());

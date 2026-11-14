@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "로컬 런처 화면의 최소 권한",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
