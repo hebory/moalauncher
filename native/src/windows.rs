@@ -27,7 +27,7 @@ use windows_sys::Win32::{
             TranslateMessage, WNDCLASSW,
             IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED, MF_SEPARATOR, MF_STRING, MF_GRAYED,
             PM_REMOVE, TPM_RETURNCMD, WM_APP, WM_DESTROY, WM_NCCREATE, WM_NULL, WM_RBUTTONUP,
-            GWLP_USERDATA, HWND_MESSAGE, MSG, QS_ALLINPUT,
+            GWLP_USERDATA, MSG, QS_ALLINPUT, WS_EX_TOOLWINDOW,
         },
     },
 };
@@ -200,7 +200,7 @@ fn worker_main(
     let state_ptr = (&mut *state) as *mut WindowState;
     let hwnd = unsafe {
         CreateWindowExW(
-            0,
+            WS_EX_TOOLWINDOW,
             class_name,
             windows_wide("모아 런처 트레이").as_ptr(),
             0,
@@ -208,7 +208,7 @@ fn worker_main(
             0,
             0,
             0,
-            HWND_MESSAGE,
+            null_mut(),
             null_mut(),
             instance,
             state_ptr.cast(),
@@ -290,46 +290,49 @@ unsafe extern "system" fn window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> windows_sys::Win32::Foundation::LRESULT {
-    if message == WM_NCCREATE {
-        let create = &*(lparam as *const windows_sys::Win32::UI::WindowsAndMessaging::CREATESTRUCTW);
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, create.lpCreateParams as isize);
-    }
-    let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState;
-    if state_ptr.is_null() {
-        return DefWindowProcW(hwnd, message, wparam, lparam);
-    }
-    let state = &mut *state_ptr;
-
-    if message == TRAY_CALLBACK {
-        match lparam as u32 {
-            windows_sys::Win32::UI::WindowsAndMessaging::WM_LBUTTONUP
-            | windows_sys::Win32::UI::Shell::NIN_SELECT => emit(state, NativeEvent::Open),
-            WM_RBUTTONUP | windows_sys::Win32::UI::WindowsAndMessaging::WM_CONTEXTMENU => {
-                show_menu(state)
-            }
-            windows_sys::Win32::UI::Shell::NIN_BALLOONUSERCLICK => {
-                if !state.announced_ids.is_empty() {
-                    emit(state, NativeEvent::ShowUpdates(state.announced_ids.clone()));
-                }
-            }
-            _ => {}
+    unsafe {
+        if message == WM_NCCREATE {
+            let create =
+                &*(lparam as *const windows_sys::Win32::UI::WindowsAndMessaging::CREATESTRUCTW);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, create.lpCreateParams as isize);
         }
-        return 0;
+        let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState;
+        if state_ptr.is_null() {
+            return DefWindowProcW(hwnd, message, wparam, lparam);
+        }
+        let state = &mut *state_ptr;
+
+        if message == TRAY_CALLBACK {
+            match lparam as u32 {
+                windows_sys::Win32::UI::WindowsAndMessaging::WM_LBUTTONUP
+                | windows_sys::Win32::UI::Shell::NIN_SELECT => emit(state, NativeEvent::Open),
+                WM_RBUTTONUP | windows_sys::Win32::UI::WindowsAndMessaging::WM_CONTEXTMENU => {
+                    show_menu(state)
+                }
+                windows_sys::Win32::UI::Shell::NIN_BALLOONUSERCLICK => {
+                    if !state.announced_ids.is_empty() {
+                        emit(state, NativeEvent::ShowUpdates(state.announced_ids.clone()));
+                    }
+                }
+                _ => {}
+            }
+            return 0;
+        }
+        if message == COMMAND_MESSAGE {
+            process_commands(state);
+            return 0;
+        }
+        if message == state.taskbar_created && state.taskbar_created != 0 {
+            add_tray_icon(state);
+            return 0;
+        }
+        if message == WM_DESTROY {
+            remove_tray_icon(state);
+            PostQuitMessage(0);
+            return 0;
+        }
+        DefWindowProcW(hwnd, message, wparam, lparam)
     }
-    if message == COMMAND_MESSAGE {
-        process_commands(state);
-        return 0;
-    }
-    if message == state.taskbar_created && state.taskbar_created != 0 {
-        add_tray_icon(state);
-        return 0;
-    }
-    if message == WM_DESTROY {
-        remove_tray_icon(state);
-        PostQuitMessage(0);
-        return 0;
-    }
-    DefWindowProcW(hwnd, message, wparam, lparam)
 }
 
 fn process_commands(state: &mut WindowState) {
@@ -429,7 +432,7 @@ fn show_menu(state: &WindowState) {
         PostMessageW(state.hwnd, WM_NULL, 0, 0);
         DestroyMenu(menu);
     }
-    match selected {
+    match selected as usize {
         MENU_OPEN => emit(state, NativeEvent::Open),
         MENU_UPDATE_ALL if state.update_enabled => emit(state, NativeEvent::UpdateAll),
         MENU_QUIT => emit(state, NativeEvent::Quit),
