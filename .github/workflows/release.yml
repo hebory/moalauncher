@@ -41,6 +41,7 @@ jobs:
             if ($tagVersion -ne $version) { throw "Tag version $tagVersion does not match app version $version." }
           }
           "MOA_RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          if (!(Test-Path -LiteralPath "docs/releases/v$version.md" -PathType Leaf)) { throw "Release notes are missing for v$version." }
       - name: Build Windows desktop executable
         run: cargo build --locked --manifest-path native/Cargo.toml --release
       - name: Find Inno Setup Compiler
@@ -72,6 +73,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: moa-launcher-rust-${{ github.run_id }}-${{ github.run_attempt }}
@@ -122,5 +126,5 @@ jobs:
             "$dist/MoaLauncher-$version-Setup-x64.exe" `
             "$dist/MoaLauncher-$version-Setup-x64.exe.sha256" `
             "$dist/SHA256SUMS.txt" `
-            --verify-tag --title "Moa Launcher $version" `
-            --notes "Moa Launcher $version Windows 배포입니다.`n`nRust + egui 네이티브 런처의 ZIP과 설치 프로그램입니다. SHA-256 체크섬은 SHA256SUMS.txt에서 확인할 수 있습니다."
+            --verify-tag --latest --title "Moa Launcher $version · Rust 네이티브" `
+            --notes-file "docs/releases/$tag.md"
