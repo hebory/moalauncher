@@ -4,6 +4,7 @@ pub mod download;
 pub mod engine;
 pub mod github;
 mod gui;
+mod gui_theme;
 pub mod install;
 mod library;
 pub mod models;

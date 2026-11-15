@@ -69,7 +69,7 @@ cargo build --locked --manifest-path native/Cargo.toml --release
 
 # 빌드된 실행 파일에서 ZIP·설치 프로그램·체크섬 생성
 ./scripts/Publish-Rust.ps1
-# 또는 ./scripts/Publish-Rust.ps1 -Version 0.3.1 -IsccPath 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+# 또는 ./scripts/Publish-Rust.ps1 -Version 0.3.2 -IsccPath 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
 ```
 
 `Publish-Rust.ps1`은 `native/target/release/MoaLauncher.exe`를 확인하고 Cargo 의존성의 라이선스 고지를 수집한 뒤 ZIP, Inno Setup 6/7 사용자별 설치 프로그램, SHA-256 체크섬을 만듭니다. 버전의 단일 기준은 `native/Cargo.toml`입니다. GitHub Actions는 Rust 형식 검사·clippy·테스트·Windows 빌드를 실행하며, 릴리스 워크플로는 버전 태그를 검증한 뒤 패키지를 게시합니다.
