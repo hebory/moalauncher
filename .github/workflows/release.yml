@@ -112,6 +112,9 @@ jobs:
           $releaseJson = gh release view $tag --json tagName 2>$null
           if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists; existing releases are not overwritten." }
           if ($LASTEXITCODE -ne 1) { throw 'Unable to check for an existing GitHub Release.' }
+          # Exit code 1 means the tag has no release yet. Do not pass this expected
+          # probe result to the Actions PowerShell wrapper as the step exit code.
+          $global:LASTEXITCODE = 0
       - name: Publish verified packages
         shell: pwsh
         env:
