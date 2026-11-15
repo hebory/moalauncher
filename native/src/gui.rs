@@ -775,8 +775,7 @@ impl NativeApp {
 
     fn card(&mut self, ui: &mut egui::Ui, app: &AppView, busy: bool) {
         let width = ui.available_width();
-        let installed_status =
-            app.installed.is_some() && !app.busy && app.error.is_none() && !has_update(app);
+        let badge = installation_badge(app);
         panel().inner_margin(0).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             ui.set_width(width);
@@ -797,23 +796,18 @@ impl NativeApp {
                     accent(&app.definition.accent_color),
                 );
             }
-            if installed_status {
+            if let Some((label, color, _)) = badge {
                 let badge_rect = egui::Rect::from_min_max(
                     rect.left_top() + Vec2::new(10.0, 10.0),
                     rect.right_top() + Vec2::new(-10.0, 30.0),
                 );
                 let mut badge_ui = ui.new_child(
                     egui::UiBuilder::new()
-                        .id_salt("cover-installed-badge")
+                        .id_salt("cover-installation-badge")
                         .max_rect(badge_rect)
                         .layout(egui::Layout::right_to_left(Align::Min)),
                 );
-                theme::compact_pill(
-                    &mut badge_ui,
-                    "설치됨",
-                    theme::SUCCESS,
-                    Color32::from_white_alpha(248),
-                );
+                theme::compact_pill(&mut badge_ui, label, color, Color32::from_white_alpha(248));
             }
             egui::Frame::new().inner_margin(18).show(ui, |ui| {
                 ui.set_width(width - 36.0);
@@ -859,7 +853,7 @@ impl NativeApp {
                     egui::Layout::left_to_right(Align::Center),
                     |ui| {
                         ui.set_min_height(28.0);
-                        if !installed_status {
+                        if badge.is_none() {
                             self.status(ui, app);
                         }
                         if app.definition.is_private {
@@ -996,6 +990,10 @@ impl NativeApp {
     }
 
     fn status(&self, ui: &mut egui::Ui, app: &AppView) {
+        if let Some((label, color, background)) = installation_badge(app) {
+            theme::compact_pill(ui, label, color, background);
+            return;
+        }
         let (message, color, bg) = if app.busy {
             (
                 app.progress
@@ -1011,16 +1009,6 @@ impl NativeApp {
                 Color32::from_rgb(166, 57, 71),
                 Color32::from_rgb(255, 239, 241),
             )
-        } else if has_update(app) {
-            ("업데이트 가능", PURPLE, theme::ACCENT_SOFT)
-        } else if app.installed.is_some() {
-            theme::compact_pill(
-                ui,
-                "설치됨",
-                theme::SUCCESS,
-                Color32::from_rgb(235, 246, 239),
-            );
-            return;
         } else if app.definition.repository.is_empty() {
             ("저장소 연결 필요", MUTED, BACKGROUND)
         } else if app.release.is_some() {
@@ -1538,6 +1526,18 @@ impl eframe::App for NativeApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         *self.wake_context.lock().unwrap() = None;
         let _ = self.engine.request_exit();
+    }
+}
+
+fn installation_badge(app: &AppView) -> Option<(&'static str, Color32, Color32)> {
+    if app.busy || app.error.is_some() {
+        None
+    } else if has_update(app) {
+        Some(("업데이트", PURPLE, theme::ACCENT_SOFT))
+    } else if app.installed.is_some() {
+        Some(("설치됨", theme::SUCCESS, Color32::from_rgb(235, 246, 239)))
+    } else {
+        None
     }
 }
 
