@@ -1,6 +1,6 @@
 [package]
 name = "moalauncher"
-version = "0.3.0"
+version = "0.3.1"
 description = "모아 프로그램 설치 및 업데이트 런처"
 edition = "2024"
 default-run = "MoaLauncher"

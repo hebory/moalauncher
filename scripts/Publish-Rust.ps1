@@ -96,12 +96,12 @@ $archiveHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.T
 "$archiveHash  $archiveName" | Set-Content -LiteralPath "$archivePath.sha256" -Encoding ascii
 
 if (!$IsccPath) {
-    $candidates = @(
+    $candidates = @(@(
         (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'),
         (Join-Path $env:ProgramFiles 'Inno Setup 6/ISCC.exe'),
         (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 7/ISCC.exe'),
         (Join-Path $env:ProgramFiles 'Inno Setup 7/ISCC.exe')
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) })
     if ($candidates.Count -gt 0) { $IsccPath = $candidates[0] }
 }
 if (!$IsccPath -or !(Test-Path -LiteralPath $IsccPath -PathType Leaf)) {
