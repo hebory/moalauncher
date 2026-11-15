@@ -547,6 +547,19 @@ pub(super) fn pill(ui: &mut Ui, text: &str, color: Color32, bg: Color32) -> Resp
         .inner
 }
 
+pub(super) fn compact_pill(ui: &mut Ui, text: &str, color: Color32, bg: Color32) -> Response {
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), FontId::proportional(11.0), color);
+    let size = Vec2::new(galley.size().x + 12.0, 20.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+    ui.painter().rect_filled(rect, 6, bg);
+    ui.painter()
+        .galley(rect.center() - galley.size() * 0.5, galley, color);
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, ui.is_enabled(), text));
+    response
+}
+
 pub(super) fn toggle(ui: &mut Ui, value: &mut bool, label: &str) -> Response {
     let enabled = ui.is_enabled();
     let (rect, _) = ui.allocate_exact_size(Vec2::new(42.0, 24.0), Sense::hover());

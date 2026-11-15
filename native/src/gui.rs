@@ -775,6 +775,8 @@ impl NativeApp {
 
     fn card(&mut self, ui: &mut egui::Ui, app: &AppView, busy: bool) {
         let width = ui.available_width();
+        let installed_status =
+            app.installed.is_some() && !app.busy && app.error.is_none() && !has_update(app);
         panel().inner_margin(0).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             ui.set_width(width);
@@ -793,6 +795,24 @@ impl NativeApp {
                     &app.definition.monogram,
                     FontId::proportional(36.0),
                     accent(&app.definition.accent_color),
+                );
+            }
+            if installed_status {
+                let badge_rect = egui::Rect::from_min_max(
+                    rect.left_top() + Vec2::new(10.0, 10.0),
+                    rect.right_top() + Vec2::new(-10.0, 30.0),
+                );
+                let mut badge_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .id_salt("cover-installed-badge")
+                        .max_rect(badge_rect)
+                        .layout(egui::Layout::right_to_left(Align::Min)),
+                );
+                theme::compact_pill(
+                    &mut badge_ui,
+                    "설치됨",
+                    theme::SUCCESS,
+                    Color32::from_white_alpha(248),
                 );
             }
             egui::Frame::new().inner_margin(18).show(ui, |ui| {
@@ -834,16 +854,23 @@ impl NativeApp {
                     },
                 );
                 ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    self.status(ui, app);
-                    if app.definition.is_private {
-                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                            theme::pill(ui, "개인", MUTED, BACKGROUND)
-                                .on_hover_text("비공개 · 개인 카탈로그");
-                            theme::icon(ui, Icon::Lock, 12.0, MUTED);
-                        });
-                    }
-                });
+                ui.allocate_ui_with_layout(
+                    Vec2::new(width - 36.0, 28.0),
+                    egui::Layout::left_to_right(Align::Center),
+                    |ui| {
+                        ui.set_min_height(28.0);
+                        if !installed_status {
+                            self.status(ui, app);
+                        }
+                        if app.definition.is_private {
+                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                theme::pill(ui, "개인", MUTED, BACKGROUND)
+                                    .on_hover_text("비공개 · 개인 카탈로그");
+                                theme::icon(ui, Icon::Lock, 12.0, MUTED);
+                            });
+                        }
+                    },
+                );
                 ui.add_space(14.0);
                 ui.horizontal(|ui| {
                     self.action_button(ui, app, busy, width - 82.0);
@@ -987,7 +1014,13 @@ impl NativeApp {
         } else if has_update(app) {
             ("업데이트 가능", PURPLE, theme::ACCENT_SOFT)
         } else if app.installed.is_some() {
-            ("설치됨", theme::SUCCESS, Color32::from_rgb(235, 246, 239))
+            theme::compact_pill(
+                ui,
+                "설치됨",
+                theme::SUCCESS,
+                Color32::from_rgb(235, 246, 239),
+            );
+            return;
         } else if app.definition.repository.is_empty() {
             ("저장소 연결 필요", MUTED, BACKGROUND)
         } else if app.release.is_some() {
