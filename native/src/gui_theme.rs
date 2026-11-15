@@ -338,6 +338,7 @@ pub(super) fn button(
     primary: bool,
     enabled: bool,
 ) -> Response {
+    let enabled = enabled && ui.is_enabled();
     let font = FontId::new(14.0, FontFamily::Proportional);
     let text = ui.painter().layout_no_wrap(label.to_owned(), font, TEXT);
     let leading_space = if leading.is_some() { 20.0 } else { 0.0 };
@@ -391,7 +392,7 @@ pub(super) fn button(
             color,
         );
     }
-    ui.painter().galley(
+    ui.painter().galley_with_override_text_color(
         Pos2::new(start + leading_space, rect.center().y - text.size().y * 0.5),
         text,
         color,
