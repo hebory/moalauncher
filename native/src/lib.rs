@@ -1,5 +1,6 @@
 mod app_process;
 pub mod artwork;
+mod artwork_protection;
 pub mod credentials;
 pub mod download;
 pub mod engine;

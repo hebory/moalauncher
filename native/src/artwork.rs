@@ -1,15 +1,61 @@
 use crate::{credentials, models::AppDefinition, storage::Paths};
 use base64::Engine;
 use reqwest::{Client, StatusCode, header};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{fs, io::Cursor, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fs,
+    io::Cursor,
+    path::{Path, PathBuf},
+    sync::{Arc, LazyLock, Mutex, Weak},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use uuid::Uuid;
 
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 const MAX_DIMENSION: u32 = 8192;
 const MAX_PIXELS: u64 = 32_000_000;
 const MAX_CACHE_FILES: usize = 64;
-const PUBLIC_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+const RETRY_INTERVAL: Duration = Duration::from_secs(60 * 60);
+const MAX_CACHE_BYTES: u64 = 12 * 1024 * 1024;
+static CACHE_IO: Mutex<()> = Mutex::new(());
+type RequestLocks = HashMap<PathBuf, Weak<tokio::sync::Mutex<()>>>;
+static REQUESTS: LazyLock<Mutex<RequestLocks>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+struct CacheRecord {
+    checked_at: u64,
+    attempted_at: u64,
+    etag: Option<String>,
+    last_modified: Option<String>,
+    image: Option<String>,
+}
+
+struct RemoteArtwork {
+    uri: url::Url,
+    path: PathBuf,
+    legacy: Option<PathBuf>,
+    token: Option<String>,
+    entropy: Vec<u8>,
+}
+
+/// Returns a validated local image without waiting for GitHub, including expired images.
+pub fn cached(paths: &Paths, app: &AppDefinition, value: &str) -> Option<String> {
+    let remote = remote_artwork(paths, app, value)?;
+    let record = read_cache(&remote)?;
+    if token_is_current(paths, &remote) {
+        record_image(&record)
+    } else {
+        None
+    }
+}
+
+pub fn clear_private_cache(paths: &Paths) {
+    let _guard = CACHE_IO.lock().unwrap();
+    let _ = fs::remove_dir_all(paths.data_dir.join("cache/artwork/private"));
+}
 
 pub async fn load(
     client: &Client,
@@ -17,60 +63,38 @@ pub async fn load(
     app: &AppDefinition,
     value: &str,
 ) -> Result<Option<String>, String> {
-    let Some((uri, _repo, is_private)) = artwork_uri(app, value) else {
+    let Some(remote) = remote_artwork(paths, app, value) else {
         return Ok(None);
     };
-    if !is_private {
-        let path = cache_path(paths, value);
-        let cached = read_public_cache(&path).and_then(|bytes| {
-            let data = image_data_url(&bytes)?;
-            Some((data, cache_is_fresh(&path, std::time::SystemTime::now())))
-        });
-        if let Some((data, true)) = &cached {
-            return Ok(Some(data.clone()));
-        }
-        let response = match client
-            .get(uri.as_str())
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await
-        {
-            Ok(r) => r,
-            Err(_) => return Ok(cached_public_fallback(cached)),
-        };
-        if response.status() != StatusCode::OK || response.url().as_str() != uri.as_str() {
-            return Ok(cached_public_fallback(cached));
-        }
-        let bytes = match read_limited(response).await {
-            Some(b) => b,
-            None => return Ok(cached_public_fallback(cached)),
-        };
-        let Some(data) = image_data_url(&bytes) else {
-            return Ok(cached_public_fallback(cached));
-        };
-        write_public_cache(&path, &bytes);
-        return Ok(Some(data));
-    }
+    load_remote(client, paths, remote).await
+}
 
-    // Private artwork is requested only from api.github.com with the token. Never cache these bytes.
-    let token = match credentials::read_token(paths) {
-        Ok(Some(t)) if valid_token(&t) => t,
-        _ => return Ok(None),
-    };
+fn remote_artwork(paths: &Paths, app: &AppDefinition, value: &str) -> Option<RemoteArtwork> {
+    let (uri, _, private) = artwork_uri(app, value)?;
+    if !private {
+        return Some(RemoteArtwork {
+            uri,
+            path: cache_path(paths, value),
+            legacy: Some(legacy_path(paths, value)),
+            token: None,
+            entropy: vec![],
+        });
+    }
+    let token = credentials::read_token(paths)
+        .ok()
+        .flatten()
+        .filter(|t| valid_token(t))?;
     let segments: Vec<String> = uri
         .path_segments()
         .map(|p| p.map(decode_segment).collect())
         .unwrap_or_default();
-    if segments.len() < 4 {
-        return Ok(None);
-    }
     let owner = &segments[0];
     let name = &segments[1];
     let reference = &segments[2];
     let mut api_url = url::Url::parse("https://api.github.com/").expect("constant URL is valid");
     {
         let Ok(mut path) = api_url.path_segments_mut() else {
-            return Ok(None);
+            return None;
         };
         path.pop_if_empty()
             .push("repos")
@@ -82,28 +106,170 @@ pub async fn load(
         }
     }
     api_url.query_pairs_mut().append_pair("ref", reference);
-    let api_url = api_url.to_string();
-    let response = match client
-        .get(&api_url)
-        .timeout(std::time::Duration::from_secs(10))
-        .bearer_auth(&token)
-        .header(header::ACCEPT, "application/vnd.github.raw+json")
-        .send()
-        .await
+    let mut scope = Sha256::new();
+    scope.update(b"MoaLauncher/private-artwork/v1\0");
+    scope.update(crate::storage::normalize_path(&paths.data_dir).as_bytes());
+    scope.update(b"\0");
+    scope.update(token.as_bytes());
+    scope.update(b"\0");
+    scope.update(value.as_bytes());
+    let entropy = scope.finalize().to_vec();
+    Some(RemoteArtwork {
+        uri: api_url,
+        path: paths
+            .data_dir
+            .join("cache/artwork/private")
+            .join(format!("{}.cache", hex::encode(&entropy))),
+        legacy: None,
+        token: Some(token),
+        entropy,
+    })
+}
+
+async fn load_remote(
+    client: &Client,
+    paths: &Paths,
+    remote: RemoteArtwork,
+) -> Result<Option<String>, String> {
+    // Coalesce concurrent calls, then re-read the result saved by the first caller.
+    let request_lock = {
+        let mut locks = REQUESTS.lock().unwrap();
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        if let Some(lock) = locks.get(&remote.path).and_then(Weak::upgrade) {
+            lock
+        } else {
+            let lock = Arc::new(tokio::sync::Mutex::new(()));
+            locks.insert(remote.path.clone(), Arc::downgrade(&lock));
+            lock
+        }
+    };
+    let _guard = request_lock.lock().await;
+    if !token_is_current(paths, &remote) {
+        return Ok(None);
+    }
+    let mut record = read_cache(&remote).unwrap_or_default();
+    let image = record_image(&record);
+    if record.image.is_some() && image.is_none() {
+        record = CacheRecord::default();
+    }
+    let now = timestamp();
+    if !should_check(&record, now) {
+        return Ok(image);
+    }
+    record.attempted_at = now;
+    let mut request = client
+        .get(remote.uri.clone())
+        .timeout(Duration::from_secs(10));
+    if let Some(token) = &remote.token {
+        request = request
+            .bearer_auth(token)
+            .header(header::ACCEPT, "application/vnd.github.raw+json");
+    }
+    if image.is_some() {
+        if let Some(etag) = &record.etag {
+            request = request.header(header::IF_NONE_MATCH, etag);
+        }
+        if let Some(modified) = &record.last_modified {
+            request = request.header(header::IF_MODIFIED_SINCE, modified);
+        }
+    }
+    let response = request.send().await.ok();
+    let Some(response) = response.filter(|r| r.url() == &remote.uri) else {
+        write_cache(paths, &remote, &record);
+        return Ok(if token_is_current(paths, &remote) {
+            image
+        } else {
+            None
+        });
+    };
+    if !token_is_current(paths, &remote) {
+        return Ok(None);
+    }
+    if remote.token.is_some()
+        && matches!(
+            response.status(),
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN | StatusCode::NOT_FOUND
+        )
     {
-        Ok(r) => r,
-        Err(_) => return Ok(None),
-    };
-    if response.status() != StatusCode::OK || response.url().as_str() != api_url {
+        record.image = None;
+        record.etag = None;
+        record.last_modified = None;
+        write_cache(paths, &remote, &record);
         return Ok(None);
     }
-    let Some(bytes) = read_limited(response).await else {
-        return Ok(None);
-    };
-    if credentials::read_token(paths).ok().flatten().as_deref() != Some(token.as_str()) {
-        return Ok(None);
+    let etag = validator(response.headers(), header::ETAG);
+    let modified = validator(response.headers(), header::LAST_MODIFIED);
+    if response.status() == StatusCode::NOT_MODIFIED && image.is_some() {
+        record.checked_at = timestamp();
+        if etag.is_some() {
+            record.etag = etag;
+        }
+        if modified.is_some() {
+            record.last_modified = modified;
+        }
+        write_cache(paths, &remote, &record);
+        return Ok(if token_is_current(paths, &remote) {
+            image
+        } else {
+            None
+        });
     }
-    Ok(image_data_url(&bytes))
+    if response.status() == StatusCode::OK
+        && let Some(bytes) = read_limited(response).await
+        && let Some(data) = image_data_url(&bytes)
+    {
+        record.image = Some(base64::engine::general_purpose::STANDARD.encode(&bytes));
+        record.checked_at = timestamp();
+        record.etag = etag;
+        record.last_modified = modified;
+        write_cache(paths, &remote, &record);
+        return Ok(if token_is_current(paths, &remote) {
+            Some(data)
+        } else {
+            None
+        });
+    }
+    write_cache(paths, &remote, &record);
+    Ok(if token_is_current(paths, &remote) {
+        image
+    } else {
+        None
+    })
+}
+
+fn token_is_current(paths: &Paths, remote: &RemoteArtwork) -> bool {
+    remote
+        .token
+        .as_ref()
+        .is_none_or(|token| credentials::read_token(paths).ok().flatten().as_ref() == Some(token))
+}
+
+fn validator(headers: &header::HeaderMap, name: header::HeaderName) -> Option<String> {
+    headers
+        .get(name)?
+        .to_str()
+        .ok()
+        .filter(|s| !s.is_empty() && s.len() <= 1024)
+        .map(str::to_owned)
+}
+
+fn timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn recent(at: u64, now: u64, duration: Duration) -> bool {
+    at != 0
+        && now
+            .checked_sub(at)
+            .is_some_and(|age| age <= duration.as_secs())
+}
+
+fn should_check(record: &CacheRecord, now: u64) -> bool {
+    !(record.image.is_some() && recent(record.checked_at, now, CACHE_TTL))
+        && !recent(record.attempted_at, now, RETRY_INTERVAL)
 }
 
 fn artwork_uri(app: &AppDefinition, value: &str) -> Option<(url::Url, String, bool)> {
@@ -241,47 +407,123 @@ fn image_data_url(bytes: &[u8]) -> Option<String> {
 }
 fn cache_path(paths: &Paths, url: &str) -> PathBuf {
     paths.data_dir.join("cache/artwork").join(format!(
-        "{}.image",
+        "{}.cache",
         hex::encode(Sha256::digest(url.as_bytes()))
     ))
 }
-fn read_public_cache(path: &PathBuf) -> Option<Vec<u8>> {
-    if fs::metadata(path).ok()?.len() > MAX_BYTES as u64 {
+fn legacy_path(paths: &Paths, url: &str) -> PathBuf {
+    cache_path(paths, url).with_extension("image")
+}
+
+fn read_bounded(path: &Path, limit: u64) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let file = fs::File::open(path).ok()?;
+    if file.metadata().ok()?.len() > limit {
         return None;
     }
-    fs::read(path).ok()
+    let mut bytes = Vec::new();
+    file.take(limit + 1).read_to_end(&mut bytes).ok()?;
+    (bytes.len() as u64 <= limit).then_some(bytes)
 }
-fn cache_is_fresh(path: &PathBuf, now: std::time::SystemTime) -> bool {
-    fs::metadata(path)
-        .and_then(|metadata| metadata.modified())
-        .ok()
-        .is_some_and(|modified| cache_is_fresh_at(modified, now))
+
+fn read_cache(remote: &RemoteArtwork) -> Option<CacheRecord> {
+    let _guard = CACHE_IO.lock().unwrap();
+    if let Some(bytes) = read_bounded(&remote.path, MAX_CACHE_BYTES) {
+        let plain = if remote.token.is_some() {
+            crate::artwork_protection::unprotect(&bytes, &remote.entropy)?
+        } else {
+            bytes
+        };
+        if let Ok(record) = serde_json::from_slice::<CacheRecord>(&plain) {
+            return Some(record);
+        }
+    }
+    // Keep existing public .image files usable without downloading again after an upgrade.
+    let legacy = remote.legacy.as_ref()?;
+    let bytes = read_bounded(legacy, MAX_BYTES as u64)?;
+    image_data_url(&bytes)?;
+    let checked_at = fs::metadata(legacy)
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    Some(CacheRecord {
+        checked_at,
+        attempted_at: checked_at,
+        image: Some(base64::engine::general_purpose::STANDARD.encode(bytes)),
+        ..Default::default()
+    })
 }
-fn cache_is_fresh_at(modified: std::time::SystemTime, now: std::time::SystemTime) -> bool {
-    now.duration_since(modified)
-        .is_ok_and(|age| age <= PUBLIC_CACHE_TTL)
+
+fn record_image(record: &CacheRecord) -> Option<String> {
+    let encoded = record.image.as_ref()?;
+    if encoded.len() > MAX_BYTES.div_ceil(3) * 4 {
+        return None;
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
+    image_data_url(&bytes)
 }
-fn cached_public_fallback(cached: Option<(String, bool)>) -> Option<String> {
-    cached.map(|(data, _)| data)
-}
-fn write_public_cache(path: &PathBuf, bytes: &[u8]) {
-    let Some(parent) = path.parent() else { return };
-    if fs::create_dir_all(parent).is_err() {
+
+fn write_cache(paths: &Paths, remote: &RemoteArtwork, record: &CacheRecord) {
+    // The same gate is used by logout/credential replacement so old requests cannot restore deleted private files.
+    let _guard = CACHE_IO.lock().unwrap();
+    if !token_is_current(paths, remote) {
         return;
+    }
+    let Ok(plain) = serde_json::to_vec(record) else {
+        return;
+    };
+    let bytes = if remote.token.is_some() {
+        let Some(bytes) = crate::artwork_protection::protect(&plain, &remote.entropy) else {
+            return;
+        };
+        bytes
+    } else {
+        plain
+    };
+    if bytes.len() as u64 > MAX_CACHE_BYTES {
+        return;
+    }
+    if write_atomic_cache(&remote.path, &bytes)
+        && let Some(legacy) = &remote.legacy
+    {
+        let _ = fs::remove_file(legacy);
+    }
+}
+
+fn write_atomic_cache(path: &Path, bytes: &[u8]) -> bool {
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    if fs::create_dir_all(parent).is_err() {
+        return false;
     }
     let tmp = path.with_extension(format!("tmp-{}", Uuid::new_v4()));
     if fs::write(&tmp, bytes).is_err() {
-        return;
+        let _ = fs::remove_file(tmp);
+        return false;
     }
-    let _ = fs::rename(tmp, path);
+    if fs::rename(&tmp, path).is_err() {
+        let _ = fs::remove_file(tmp);
+        return false;
+    }
     let Ok(entries) = fs::read_dir(parent) else {
-        return;
+        return true;
     };
     let mut files: Vec<_> = entries
         .flatten()
         .filter_map(|e| {
             let m = e.metadata().ok()?;
-            m.is_file().then(|| (m.modified().ok(), e.path()))
+            (m.is_file()
+                && matches!(
+                    e.path().extension().and_then(|s| s.to_str()),
+                    Some("cache" | "image")
+                ))
+            .then(|| (m.modified().ok(), e.path()))
         })
         .collect();
     if files.len() > MAX_CACHE_FILES {
@@ -290,7 +532,12 @@ fn write_public_cache(path: &PathBuf, bytes: &[u8]) {
             let _ = fs::remove_file(p);
         }
     }
+    true
 }
+
+#[cfg(test)]
+#[path = "artwork_network_tests.rs"]
+mod network_tests;
 
 #[cfg(test)]
 mod tests {
@@ -338,22 +585,20 @@ mod tests {
     }
 
     #[test]
-    fn public_cache_freshness_expires_after_five_minutes() {
-        let now = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
-        assert!(cache_is_fresh_at(now - PUBLIC_CACHE_TTL, now));
-        assert!(!cache_is_fresh_at(
-            now - PUBLIC_CACHE_TTL - std::time::Duration::from_secs(1),
-            now
-        ));
-    }
-
-    #[test]
-    fn expired_public_cache_is_kept_as_network_failure_fallback() {
-        let stale = Some(("data:image/png;base64,AA==".to_string(), false));
-        assert_eq!(
-            cached_public_fallback(stale),
-            Some("data:image/png;base64,AA==".to_string())
-        );
-        assert_eq!(cached_public_fallback(None), None);
+    fn cache_freshness_and_failure_retry_are_independent() {
+        let now = 200_000;
+        let mut record = CacheRecord {
+            checked_at: now - CACHE_TTL.as_secs(),
+            image: Some("fixture".into()),
+            ..Default::default()
+        };
+        assert!(!should_check(&record, now));
+        record.checked_at -= 1;
+        assert!(should_check(&record, now));
+        record.attempted_at = now;
+        assert!(!should_check(&record, now + RETRY_INTERVAL.as_secs()));
+        assert!(should_check(&record, now + RETRY_INTERVAL.as_secs() + 1));
+        // Clock rollback must not indefinitely postpone checking.
+        assert!(should_check(&record, 1));
     }
 }

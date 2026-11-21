@@ -57,8 +57,28 @@ pub struct Snapshot {
     pub last_checked: Option<String>,
     pub notification_ids: Vec<String>,
     pub auth_generation: u64,
+    pub credential_generation: u64,
     pub update_result: Option<UpdateResult>,
     pub force_close_prompt: Option<ForceClosePrompt>,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct ArtworkIdentity {
+    pub repository: String,
+    pub is_private: bool,
+    pub icon_url: Option<String>,
+    pub cover_url: Option<String>,
+}
+
+impl ArtworkIdentity {
+    pub fn from_definition(definition: &AppDefinition) -> Self {
+        Self {
+            repository: definition.repository.clone(),
+            is_private: definition.is_private,
+            icon_url: definition.icon_url.clone(),
+            cover_url: definition.cover_url.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -99,9 +119,11 @@ pub enum EngineEvent {
     ForceCloseRequested,
     Artwork {
         id: String,
+        identity: ArtworkIdentity,
         icon: Option<String>,
         cover: Option<String>,
-        generation: u64,
+        credential_generation: u64,
+        refresh_finished: bool,
     },
 }
 
@@ -116,6 +138,7 @@ struct Data {
     announced: HashSet<String>,
     announced_ids: HashSet<String>,
     auth_generation: u64,
+    credential_generation: u64,
     next_check: Instant,
     update_result: Option<UpdateResult>,
     working: bool,
@@ -130,6 +153,21 @@ struct PendingForceClose {
 struct ForceClosePromptGuard {
     engine: Weak<Engine>,
     request_id: String,
+}
+
+struct ArtworkRequestGuard {
+    engine: Arc<Engine>,
+    key: (u64, String, ArtworkIdentity),
+}
+
+impl Drop for ArtworkRequestGuard {
+    fn drop(&mut self) {
+        self.engine
+            .artwork_requests
+            .lock()
+            .unwrap()
+            .remove(&self.key);
+    }
 }
 
 impl Drop for ForceClosePromptGuard {
@@ -151,6 +189,7 @@ struct Engine {
     activity: tokio::sync::Mutex<()>,
     cancellations: Mutex<HashMap<String, Arc<AtomicBool>>>,
     force_close: Mutex<Option<PendingForceClose>>,
+    artwork_requests: Mutex<HashSet<(u64, String, ArtworkIdentity)>>,
     batch_cancel: AtomicBool,
     exiting: AtomicBool,
     background: AtomicBool,
@@ -231,6 +270,7 @@ impl SharedEngine {
                 announced: HashSet::new(),
                 announced_ids: HashSet::new(),
                 auth_generation: 0,
+                credential_generation: 0,
                 next_check: Instant::now() + interval,
                 update_result,
                 working: false,
@@ -239,6 +279,7 @@ impl SharedEngine {
             activity: tokio::sync::Mutex::new(()),
             cancellations: Mutex::new(HashMap::new()),
             force_close: Mutex::new(None),
+            artwork_requests: Mutex::new(HashSet::new()),
             batch_cancel: AtomicBool::new(false),
             exiting: AtomicBool::new(false),
             background: AtomicBool::new(false),
@@ -502,51 +543,94 @@ impl SharedEngine {
     }
     pub fn load_artwork(&self, id: String) -> Result<(), String> {
         let engine = self.0.clone();
+        let (identity, credential_generation) = {
+            let data = engine.data.lock().unwrap();
+            let Some(view) = data.apps.iter().find(|app| app.definition.id == id) else {
+                return Ok(());
+            };
+            (
+                ArtworkIdentity::from_definition(&view.definition),
+                data.credential_generation,
+            )
+        };
+        let key = (credential_generation, id.clone(), identity.clone());
+        if !engine.artwork_requests.lock().unwrap().insert(key.clone()) {
+            return Ok(());
+        }
+        let request_guard = ArtworkRequestGuard {
+            engine: engine.clone(),
+            key,
+        };
         self.0.runtime.spawn(async move {
-            let (view, generation) = {
+            let _request = request_guard;
+            let view = {
                 let data = engine.data.lock().unwrap();
                 let Some(view) = data
                     .apps
                     .iter()
-                    .find(|app| app.definition.id == id)
+                    .find(|app| {
+                        app.definition.id == id
+                            && ArtworkIdentity::from_definition(&app.definition) == identity
+                    })
                     .cloned()
                 else {
                     return;
                 };
-                (view, data.auth_generation)
+                view
             };
-            let icon = if let Some(url) = &view.definition.icon_url {
-                artwork::load(&engine.client, &engine.paths, &view.definition, url)
-                    .await
-                    .unwrap_or(None)
-            } else {
-                None
-            };
-            let cover = if let Some(url) = &view.definition.cover_url {
-                artwork::load(&engine.client, &engine.paths, &view.definition, url)
-                    .await
-                    .unwrap_or(None)
-            } else {
-                None
-            };
-            let queued = {
-                let data = engine.data.lock().unwrap();
-                if artwork_generation_is_current(data.auth_generation, generation)
-                    && data.apps.iter().any(|app| app.definition.id == id)
-                {
-                    let _ = engine.event_tx.send(EngineEvent::Artwork {
-                        id,
-                        icon,
-                        cover,
-                        generation,
-                    });
-                    true
-                } else {
-                    false
+            let cached_icon = view
+                .definition
+                .icon_url
+                .as_deref()
+                .and_then(|url| artwork::cached(&engine.paths, &view.definition, url));
+            let cached_cover = view
+                .definition
+                .cover_url
+                .as_deref()
+                .and_then(|url| artwork::cached(&engine.paths, &view.definition, url));
+            if cached_icon.is_some() || cached_cover.is_some() {
+                engine.emit_artwork_if_current(
+                    &id,
+                    &identity,
+                    credential_generation,
+                    cached_icon.clone(),
+                    cached_cover.clone(),
+                    false,
+                );
+            }
+            let icon_url = view.definition.icon_url.as_deref();
+            let cover_url = view.definition.cover_url.as_deref();
+            let (icon, cover) = tokio::join!(
+                async {
+                    match icon_url {
+                        Some(url) => {
+                            artwork::load(&engine.client, &engine.paths, &view.definition, url)
+                                .await
+                                .unwrap_or(None)
+                        }
+                        None => None,
+                    }
+                },
+                async {
+                    match cover_url {
+                        Some(url) => {
+                            artwork::load(&engine.client, &engine.paths, &view.definition, url)
+                                .await
+                                .unwrap_or(None)
+                        }
+                        None => None,
+                    }
                 }
-            };
-            if queued {
-                (engine.wake)();
+            );
+            if icon != cached_icon || cover != cached_cover {
+                engine.emit_artwork_if_current(
+                    &id,
+                    &identity,
+                    credential_generation,
+                    icon,
+                    cover,
+                    true,
+                );
             }
         });
         Ok(())
@@ -735,6 +819,7 @@ impl Engine {
             last_checked: data.last_checked.clone(),
             notification_ids: data.notification_ids.clone(),
             auth_generation: data.auth_generation,
+            credential_generation: data.credential_generation,
             update_result: data.update_result.clone(),
             force_close_prompt: data.force_close_prompt.clone(),
         }
@@ -841,8 +926,10 @@ impl Engine {
         }
     }
     fn invalidate_private(&self) {
+        artwork::clear_private_cache(&self.paths);
         let mut data = self.data.lock().unwrap();
         data.auth_generation += 1;
+        data.credential_generation += 1;
         data.notification_ids.clear();
         data.announced.clear();
         data.announced_ids.clear();
@@ -852,6 +939,36 @@ impl Engine {
                 view.error = None;
                 view.is_cached = false;
             }
+        }
+    }
+
+    fn emit_artwork_if_current(
+        &self,
+        id: &str,
+        identity: &ArtworkIdentity,
+        credential_generation: u64,
+        icon: Option<String>,
+        cover: Option<String>,
+        refresh_finished: bool,
+    ) {
+        let current = {
+            let data = self.data.lock().unwrap();
+            data.credential_generation == credential_generation
+                && data.apps.iter().any(|app| {
+                    app.definition.id == id
+                        && ArtworkIdentity::from_definition(&app.definition) == *identity
+                })
+        };
+        if current {
+            let _ = self.event_tx.send(EngineEvent::Artwork {
+                id: id.to_owned(),
+                identity: identity.clone(),
+                icon,
+                cover,
+                credential_generation,
+                refresh_finished,
+            });
+            (self.wake)();
         }
     }
     fn save_settings(&self, patch: serde_json::Value) -> Result<(), String> {
@@ -933,10 +1050,6 @@ impl Engine {
         drop(data);
         self.event(EngineEvent::Notify { ids, body });
     }
-}
-
-fn artwork_generation_is_current(current: u64, requested: u64) -> bool {
-    current == requested
 }
 
 fn read_catalog(path: &Path) -> Result<Catalog, String> {
@@ -1364,8 +1477,14 @@ mod tests {
     }
 
     #[test]
-    fn private_auth_changes_invalidate_cached_artwork_generation() {
+    fn private_auth_generation_changes_without_reloading_public_artwork() {
         let (engine, _runtime, path) = fixture();
+        let initial = engine.snapshot();
+        engine.0.rebuild().unwrap();
+        let rebuilt = engine.snapshot();
+        assert!(rebuilt.auth_generation > initial.auth_generation);
+        assert_eq!(rebuilt.credential_generation, initial.credential_generation);
+
         let definition = AppDefinition {
             id: "private-fixture".into(),
             name: "비공개 테스트".into(),
@@ -1400,6 +1519,7 @@ mod tests {
         });
 
         let before = engine.snapshot().auth_generation;
+        let before_credential = engine.snapshot().credential_generation;
         engine.0.invalidate_private();
         let after = engine.snapshot();
         let private = after
@@ -1408,16 +1528,9 @@ mod tests {
             .find(|app| app.definition.id == "private-fixture")
             .unwrap();
         assert!(after.auth_generation > before);
+        assert!(after.credential_generation > before_credential);
         assert!(private.release.is_none());
         assert!(!private.is_cached);
-        assert!(!artwork_generation_is_current(
-            after.auth_generation,
-            before
-        ));
-        assert!(artwork_generation_is_current(
-            after.auth_generation,
-            after.auth_generation
-        ));
         remove_fixture(&path);
     }
 

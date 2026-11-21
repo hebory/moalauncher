@@ -1,5 +1,5 @@
 use crate::{
-    engine::{AppView, EngineEvent, SharedEngine, Snapshot, has_update},
+    engine::{AppView, ArtworkIdentity, EngineEvent, SharedEngine, Snapshot, has_update},
     gui_theme::{self as theme, ACCENT as PURPLE, BACKGROUND, BORDER, Icon, MUTED},
     library::{self, Filter},
     models::{AppDefinition, Catalog, PackageDefinition},
@@ -9,15 +9,20 @@ use crate::{
 };
 use base64::Engine;
 use eframe::egui::{self, Align, Color32, FontId, RichText, TextureHandle, Vec2};
+use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, mpsc::Receiver},
+    time::{Duration, Instant},
 };
 
 #[derive(Default)]
 struct Artwork {
+    identity: Option<ArtworkIdentity>,
     icon: Option<TextureHandle>,
     cover: Option<TextureHandle>,
+    icon_fingerprint: Option<[u8; 32]>,
+    cover_fingerprint: Option<[u8; 32]>,
 }
 #[derive(PartialEq)]
 enum Page {
@@ -38,7 +43,9 @@ pub struct NativeApp {
     native_events: Receiver<NativeEvent>,
     snapshot: Snapshot,
     artwork: HashMap<String, Artwork>,
-    generation: u64,
+    credential_generation: u64,
+    artwork_check_generation: u64,
+    next_artwork_check: Instant,
     launcher_icon: TextureHandle,
     launcher_cover: TextureHandle,
     page: Page,
@@ -72,6 +79,8 @@ impl NativeApp {
         } = session;
         *wake_context.lock().unwrap() = Some(cc.egui_ctx.clone());
         let snapshot = engine.snapshot();
+        let credential_generation = snapshot.credential_generation;
+        let artwork_check_generation = snapshot.auth_generation;
         let launcher_icon = texture(
             &cc.egui_ctx,
             "launcher-icon",
@@ -96,7 +105,9 @@ impl NativeApp {
             native_events,
             snapshot,
             artwork: HashMap::new(),
-            generation: u64::MAX,
+            credential_generation,
+            artwork_check_generation,
+            next_artwork_check: Instant::now() + Duration::from_secs(60 * 60),
             launcher_icon,
             launcher_cover,
             page: Page::Library,
@@ -195,18 +206,50 @@ impl NativeApp {
                 }
                 EngineEvent::Artwork {
                     id,
+                    identity,
                     icon,
                     cover,
-                    generation,
+                    credential_generation,
+                    refresh_finished,
                 } => {
-                    if generation == self.snapshot.auth_generation {
-                        let icon = icon
-                            .as_deref()
-                            .and_then(|value| data_texture(ctx, "program-icon", value));
-                        let cover = cover
-                            .as_deref()
-                            .and_then(|value| data_texture(ctx, "program-cover", value));
-                        self.artwork.insert(id, Artwork { icon, cover });
+                    let current = self
+                        .snapshot
+                        .apps
+                        .iter()
+                        .find(|app| app.definition.id == id)
+                        .filter(|app| ArtworkIdentity::from_definition(&app.definition) == identity)
+                        .is_some();
+                    if credential_generation == self.snapshot.credential_generation
+                        && current
+                        && self
+                            .artwork
+                            .get(&id)
+                            .is_some_and(|art| art.identity.as_ref() == Some(&identity))
+                    {
+                        if let Some(value) = icon {
+                            let fingerprint: [u8; 32] = Sha256::digest(value.as_bytes()).into();
+                            let art = self.artwork.get_mut(&id).unwrap();
+                            if art.icon_fingerprint != Some(fingerprint) {
+                                art.icon = data_texture(ctx, "program-icon", &value);
+                                art.icon_fingerprint = Some(fingerprint);
+                            }
+                        } else if refresh_finished {
+                            let art = self.artwork.get_mut(&id).unwrap();
+                            art.icon = None;
+                            art.icon_fingerprint = None;
+                        }
+                        if let Some(value) = cover {
+                            let fingerprint: [u8; 32] = Sha256::digest(value.as_bytes()).into();
+                            let art = self.artwork.get_mut(&id).unwrap();
+                            if art.cover_fingerprint != Some(fingerprint) {
+                                art.cover = data_texture(ctx, "program-cover", &value);
+                                art.cover_fingerprint = Some(fingerprint);
+                            }
+                        } else if refresh_finished {
+                            let art = self.artwork.get_mut(&id).unwrap();
+                            art.cover = None;
+                            art.cover_fingerprint = None;
+                        }
                     }
                 }
             }
@@ -232,15 +275,7 @@ impl NativeApp {
                 NativeEvent::Quit => self.quit(ctx),
             }
         }
-        if self.generation != self.snapshot.auth_generation {
-            self.generation = self.snapshot.auth_generation;
-            self.artwork.clear();
-            for app in &self.snapshot.apps {
-                if !app.is_launcher {
-                    let _ = self.engine.load_artwork(app.definition.id.clone());
-                }
-            }
-        }
+        self.reconcile_artwork();
         self.tray
             .set_update_enabled(!self.busy() && library::update_count(&self.snapshot.apps) > 0);
         if ctx.input(|input| input.viewport().close_requested()) && !self.quitting {
@@ -252,6 +287,63 @@ impl NativeApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             self.visible = false;
             self.engine.set_background(true);
+        }
+    }
+
+    fn reconcile_artwork(&mut self) {
+        let apps: Vec<_> = self
+            .snapshot
+            .apps
+            .iter()
+            .filter(|app| !app.is_launcher)
+            .map(|app| {
+                (
+                    app.definition.id.clone(),
+                    ArtworkIdentity::from_definition(&app.definition),
+                )
+            })
+            .collect();
+        let current_ids: std::collections::HashSet<_> =
+            apps.iter().map(|(id, _)| id.as_str()).collect();
+        self.artwork
+            .retain(|id, _| current_ids.contains(id.as_str()));
+
+        let credential_changed = self.credential_generation != self.snapshot.credential_generation;
+        self.credential_generation = self.snapshot.credential_generation;
+        let catalog_check_changed = self.artwork_check_generation != self.snapshot.auth_generation;
+        self.artwork_check_generation = self.snapshot.auth_generation;
+        let periodic_check_due = Instant::now() >= self.next_artwork_check;
+        if periodic_check_due {
+            self.next_artwork_check = Instant::now() + Duration::from_secs(60 * 60);
+        }
+        let mut to_load = Vec::new();
+        for (id, identity) in apps {
+            let definition_changed = self
+                .artwork
+                .get(&id)
+                .is_none_or(|art| art.identity.as_ref() != Some(&identity));
+            if definition_changed {
+                self.artwork.insert(
+                    id.clone(),
+                    Artwork {
+                        identity: Some(identity.clone()),
+                        ..Artwork::default()
+                    },
+                );
+                to_load.push(id);
+            } else if credential_changed && identity.is_private {
+                let art = self.artwork.get_mut(&id).unwrap();
+                art.icon = None;
+                art.cover = None;
+                art.icon_fingerprint = None;
+                art.cover_fingerprint = None;
+                to_load.push(id);
+            } else if catalog_check_changed || periodic_check_due {
+                to_load.push(id);
+            }
+        }
+        for id in to_load {
+            let _ = self.engine.load_artwork(id);
         }
     }
 
