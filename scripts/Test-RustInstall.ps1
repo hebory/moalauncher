@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$MakensisPath,
-    [string]$IsccPath
+    [string]$IsccPath,
+    [switch]$TestRunningApps
 )
 
 $ErrorActionPreference = 'Stop'
@@ -141,14 +142,26 @@ foreach ($kind in @('nsis', 'inno')) {
 }
 
 $previous = $env:MOALAUNCHER_RUST_INSTALL_FIXTURE_ROOT
+$previousProcessFixture = $env:MOA_PROCESS_FIXTURE_EXE
 try {
     $env:MOALAUNCHER_RUST_INSTALL_FIXTURE_ROOT = $fixtureRoot
     & cargo test --manifest-path (Join-Path $repositoryRoot 'native/Cargo.toml') installer_fixtures_install_update_and_preserve_state_after_failure -- --ignored --nocapture
     if ($LASTEXITCODE -ne 0) { throw 'Rust NSIS/Inno installation and update fixture tests failed.' }
+    if ($TestRunningApps) {
+        & cargo build --locked --manifest-path (Join-Path $repositoryRoot 'native/Cargo.toml') --bin process_fixture
+        if ($LASTEXITCODE -ne 0) { throw 'Isolated process fixture build failed.' }
+        $env:MOA_PROCESS_FIXTURE_EXE = Join-Path $repositoryRoot 'native/target/debug/process_fixture.exe'
+        & cargo test --locked --manifest-path (Join-Path $repositoryRoot 'native/Cargo.toml') --lib app_process:: -- --ignored --nocapture
+        if ($LASTEXITCODE -ne 0) { throw 'Exact-path process shutdown tests failed.' }
+        & cargo test --locked --manifest-path (Join-Path $repositoryRoot 'native/Cargo.toml') --lib install::process_tests:: -- --ignored --nocapture
+        if ($LASTEXITCODE -ne 0) { throw 'Running application installation boundary tests failed.' }
+    }
 }
 finally {
     if ($null -eq $previous) { Remove-Item Env:MOALAUNCHER_RUST_INSTALL_FIXTURE_ROOT -ErrorAction SilentlyContinue }
     else { $env:MOALAUNCHER_RUST_INSTALL_FIXTURE_ROOT = $previous }
+    if ($null -eq $previousProcessFixture) { Remove-Item Env:MOA_PROCESS_FIXTURE_EXE -ErrorAction SilentlyContinue }
+    else { $env:MOA_PROCESS_FIXTURE_EXE = $previousProcessFixture }
 }
 
 Write-Host "Rust NSIS/Inno fixture verification completed under $fixtureRoot"

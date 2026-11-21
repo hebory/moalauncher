@@ -71,6 +71,7 @@ impl Session {
             for event in self.engine.drain_events() {
                 match event {
                     EngineEvent::Notify { ids, body } => self.tray.notify(ids, &body),
+                    EngineEvent::ForceCloseRequested => return true,
                     EngineEvent::ExitRequested => return false,
                     EngineEvent::Error(error) => self.error = error,
                     _ => {}
@@ -98,6 +99,9 @@ impl Session {
                 }
             }
             let snapshot = self.engine.snapshot();
+            if snapshot.force_close_prompt.is_some() {
+                return true;
+            }
             let busy = snapshot.checking
                 || snapshot.batch_updating
                 || snapshot.working

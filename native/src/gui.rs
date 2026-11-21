@@ -141,6 +141,10 @@ impl NativeApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     }
     fn quit(&mut self, ctx: &egui::Context) {
+        if let Some(prompt) = self.snapshot.force_close_prompt.as_ref() {
+            self.engine.respond_force_close(&prompt.request_id, false);
+            self.snapshot = self.engine.snapshot();
+        }
         match self.engine.request_exit() {
             Ok(()) => {
                 self.quitting = true;
@@ -164,6 +168,10 @@ impl NativeApp {
         for event in events {
             match event {
                 EngineEvent::Changed => {}
+                EngineEvent::ForceCloseRequested => {
+                    self.snapshot = self.engine.snapshot();
+                    self.show(ctx);
+                }
                 EngineEvent::Notify { ids, body } => self.tray.notify(ids, &body),
                 EngineEvent::Error(error) => {
                     self.error = error;
@@ -236,6 +244,10 @@ impl NativeApp {
         self.tray
             .set_update_enabled(!self.busy() && library::update_count(&self.snapshot.apps) > 0);
         if ctx.input(|input| input.viewport().close_requested()) && !self.quitting {
+            if let Some(prompt) = self.snapshot.force_close_prompt.as_ref() {
+                self.engine.respond_force_close(&prompt.request_id, false);
+                self.snapshot = self.engine.snapshot();
+            }
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             self.visible = false;
@@ -1484,6 +1496,48 @@ impl NativeApp {
             }
             if close || (response.should_close() && !self.catalog_pending) {
                 self.imported = None;
+            }
+        }
+        // Keep process termination confirmation above every other modal dialog.
+        if let Some(prompt) = self.snapshot.force_close_prompt.clone() {
+            let mut deny = false;
+            let mut force_close = false;
+            let response = egui::Modal::new(egui::Id::unique("force-close-before-update"))
+                .frame(panel())
+                .show(ctx, |ui| {
+                    ui.set_width(480.0_f32.min(ctx.content_rect().width() - 70.0));
+                    ui.heading("프로그램을 종료하고 업데이트할까요?");
+                    ui.add_space(10.0);
+                    ui.label(theme::strong(&prompt.app_name, 17.0));
+                    ui.label(
+                        RichText::new(format!("실행 중인 프로세스 {}개", prompt.process_count))
+                            .size(13.0)
+                            .color(MUTED),
+                    );
+                    ui.add_space(14.0);
+                    ui.label("일반 종료 요청에 응답하지 않았습니다.");
+                    ui.colored_label(
+                        Color32::from_rgb(162, 95, 34),
+                        "강제 종료하면 저장하지 않은 작업이 사라질 수 있습니다.",
+                    );
+                    ui.add_space(18.0);
+                    ui.horizontal(|ui| {
+                        if ui.add(egui::Button::new("취소")).clicked() {
+                            deny = true;
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                            if ui.add(primary_button("강제 종료 후 업데이트")).clicked() {
+                                force_close = true;
+                            }
+                        });
+                    });
+                });
+            if force_close {
+                self.engine.respond_force_close(&prompt.request_id, true);
+                self.snapshot = self.engine.snapshot();
+            } else if deny || response.should_close() {
+                self.engine.respond_force_close(&prompt.request_id, false);
+                self.snapshot = self.engine.snapshot();
             }
         }
     }

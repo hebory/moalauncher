@@ -10,18 +10,103 @@ use crate::{
 use std::{
     collections::HashSet,
     fs,
+    future::Future,
     path::{Component, Path, PathBuf},
+    pin::Pin,
     process::Command,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 use sysinfo::{ProcessesToUpdate, System};
 
 const MAX_EXPANDED: u64 = 5 * 1024 * 1024 * 1024;
 const MAX_ENTRY: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_ZIP_ENTRIES: usize = 100_000;
+pub type ConfirmForceClose = Arc<
+    dyn Fn(InstalledApp, usize) -> Pin<Box<dyn Future<Output = Result<bool, String>> + Send>>
+        + Send
+        + Sync,
+>;
+
+async fn stop_for_update(
+    app: &AppDefinition,
+    installed: &InstalledApp,
+    cancel: &AtomicBool,
+    cb: &(dyn Fn(InstallProgress) + Send + Sync),
+    confirm: &ConfirmForceClose,
+) -> Result<(), String> {
+    // Restarting apps need a fresh request and fresh consent for each captured process set.
+    for _ in 0..3 {
+        check_cancel(cancel)?;
+        let processes = crate::app_process::capture(Path::new(&installed.executable_path))?;
+        if processes.is_empty() {
+            return Ok(());
+        }
+        report(app, "프로그램 종료 요청", 0, None, cb);
+        // UIPI or a tray-only app may reject/ignore WM_CLOSE. Force close still requires consent.
+        let _ = processes.request_close();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while !processes.all_exited()? && tokio::time::Instant::now() < deadline {
+            check_cancel(cancel)?;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        check_cancel(cancel)?;
+        if processes.all_exited()? {
+            continue;
+        }
+        report(app, "강제 종료 확인 대기", 0, None, cb);
+        let approved = {
+            let decision = confirm(installed.clone(), processes.pids().len());
+            tokio::pin!(decision);
+            loop {
+                tokio::select! {
+                    result = &mut decision => break Some(result?),
+                    _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                        check_cancel(cancel)?;
+                        if processes.all_exited()? { break None; }
+                    }
+                }
+            }
+        }; // Dropping the confirmation future dismisses a prompt after manual app exit.
+        check_cancel(cancel)?;
+        if approved == Some(false) {
+            return Err(
+                "업데이트가 취소되었습니다. 프로그램과 기존 설치 파일을 유지했습니다.".into(),
+            );
+        }
+        if approved == Some(true) {
+            report(app, "프로그램 종료 중", 0, None, cb);
+            processes.force_close()?;
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+            while !processes.all_exited()? && tokio::time::Instant::now() < deadline {
+                check_cancel(cancel)?;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            if !processes.all_exited()? {
+                return Err("프로그램 종료를 확인하지 못해 업데이트를 중단했습니다.".into());
+            }
+        }
+    }
+    check_cancel(cancel)?;
+    if crate::app_process::capture(Path::new(&installed.executable_path))?.is_empty() {
+        Ok(())
+    } else {
+        Err(
+            "프로그램이 다시 실행되어 업데이트를 중단했습니다. 자동 재실행을 끄고 다시 시도하세요."
+                .into(),
+        )
+    }
+}
+
+fn require_stopped(executable: &Path) -> Result<(), String> {
+    if executable.is_file() && !crate::app_process::capture(executable)?.is_empty() {
+        return Err("설치 직전에 프로그램이 다시 실행되어 업데이트를 중단했습니다.".into());
+    }
+    Ok(())
+}
 fn report(
     app: &AppDefinition,
     stage: &str,
@@ -286,6 +371,7 @@ pub async fn install(
     release: &AppRelease,
     cancel: Arc<AtomicBool>,
     progress: Arc<dyn Fn(InstallProgress) + Send + Sync>,
+    confirm: ConfirmForceClose,
 ) -> Result<InstalledApp, String> {
     if app.is_private != release.is_private {
         return Err(
@@ -306,12 +392,6 @@ pub async fn install(
     let asset = select_asset(release, package)?;
     if asset.size > MAX_PACKAGE_BYTES {
         return Err("릴리스 파일이 허용 크기를 초과했습니다.".into());
-    }
-    let current = find_installed(paths, app)?;
-    if current.as_ref().is_some_and(is_running) {
-        return Err(
-            "프로그램이 실행 중이므로 업데이트하지 않았습니다. 앱을 닫고 다시 시도하세요.".into(),
-        );
     }
     let dl_dir = paths.data_dir.join("downloads").join(segment(&app.id)?);
     fs::create_dir_all(&dl_dir).map_err(|_| "다운로드 폴더를 만들지 못했습니다.")?;
@@ -368,6 +448,7 @@ pub async fn install(
                 &archive,
                 progress.clone(),
                 cancel.clone(),
+                &confirm,
             )
             .await
         } else if is_installer(package) {
@@ -379,6 +460,7 @@ pub async fn install(
                 &archive,
                 progress.as_ref(),
                 &cancel,
+                &confirm,
             )
             .await
         } else {
@@ -457,6 +539,7 @@ async fn expected_sha256(
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn install_zip(
     paths: &Paths,
     app: &AppDefinition,
@@ -465,6 +548,7 @@ async fn install_zip(
     archive_path: &Path,
     cb: Arc<dyn Fn(InstallProgress) + Send + Sync>,
     cancel: Arc<AtomicBool>,
+    confirm: &ConfirmForceClose,
 ) -> Result<InstalledApp, String> {
     let version = version_tag(&release.tag)?;
     let root = install_dir(paths, app, package, Some(&version))?;
@@ -477,37 +561,40 @@ async fn install_zip(
         let _ = fs::remove_dir_all(&stage);
         return Err(e);
     }
-    let result = extract_zip(archive_path, &stage, cb.clone(), &app.id, cancel.clone())
-        .await
-        .and_then(|_| {
-            let exe = safe_relative(&stage, &package.executable_path)?;
-            if !exe.is_file() {
-                return Err("패키지에 지정된 실행 파일이 없습니다.".into());
-            }
+    let result = async {
+        extract_zip(archive_path, &stage, cb.clone(), &app.id, cancel.clone()).await?;
+        let exe = safe_relative(&stage, &package.executable_path)?;
+        if !exe.is_file() {
+            return Err("패키지에 지정된 실행 파일이 없습니다.".into());
+        }
+        check_cancel(&cancel)?;
+        if root.exists() {
+            return Err("같은 버전의 설치 폴더가 이미 있습니다. 기존 파일을 보존했습니다.".into());
+        }
+        if let Some(current) = find_installed(paths, app)? {
+            stop_for_update(app, &current, &cancel, cb.as_ref(), confirm).await?;
             check_cancel(&cancel)?;
-            if root.exists() {
-                return Err(
-                    "같은 버전의 설치 폴더가 이미 있습니다. 기존 파일을 보존했습니다.".into(),
-                );
-            }
-            fs::rename(&stage, &root).map_err(|_| "설치 폴더를 확정하지 못했습니다.")?;
-            let installed = InstalledApp {
-                app_id: app.id.clone(),
-                version: release.tag.clone(),
-                executable_path: safe_relative(&root, &package.executable_path)?
-                    .to_string_lossy()
-                    .into_owned(),
-                install_directory: root.to_string_lossy().into_owned(),
-                package_kind: package.kind.clone(),
-                installed_at: chrono::Utc::now().to_rfc3339(),
-            };
-            if let Err(e) = crate::storage::save_installed(paths, &installed) {
-                let _ = fs::remove_dir_all(&root);
-                return Err(e);
-            }
-            report(app, "설치 완료", 1, Some(1), cb.as_ref());
-            Ok(installed)
-        });
+            require_stopped(Path::new(&current.executable_path))?;
+        }
+        fs::rename(&stage, &root).map_err(|_| "설치 폴더를 확정하지 못했습니다.")?;
+        let installed = InstalledApp {
+            app_id: app.id.clone(),
+            version: release.tag.clone(),
+            executable_path: safe_relative(&root, &package.executable_path)?
+                .to_string_lossy()
+                .into_owned(),
+            install_directory: root.to_string_lossy().into_owned(),
+            package_kind: package.kind.clone(),
+            installed_at: chrono::Utc::now().to_rfc3339(),
+        };
+        if let Err(e) = crate::storage::save_installed(paths, &installed) {
+            let _ = fs::remove_dir_all(&root);
+            return Err(e);
+        }
+        report(app, "설치 완료", 1, Some(1), cb.as_ref());
+        Ok(installed)
+    }
+    .await;
     let _ = fs::remove_dir_all(stage);
     result
 }
@@ -618,6 +705,7 @@ async fn extract_zip(
     .map_err(str::to_owned)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn install_executable(
     paths: &Paths,
     app: &AppDefinition,
@@ -626,10 +714,13 @@ async fn install_executable(
     installer: &Path,
     cb: &(dyn Fn(InstallProgress) + Send + Sync),
     cancel: &AtomicBool,
+    confirm: &ConfirmForceClose,
 ) -> Result<InstalledApp, String> {
     let root = install_dir(paths, app, package, None)?;
     let exe = safe_relative(&root, &package.executable_path)?;
-    if exe.exists() {
+    fs::create_dir_all(&root).map_err(|_| "설치 폴더를 만들지 못했습니다.")?;
+    reject_reparse_path(&root)?;
+    if exe.is_file() {
         let probe = InstalledApp {
             app_id: app.id.clone(),
             version: String::new(),
@@ -638,12 +729,8 @@ async fn install_executable(
             package_kind: package.kind.clone(),
             installed_at: String::new(),
         };
-        if is_running(&probe) {
-            return Err("프로그램이 실행 중이므로 업데이트하지 않았습니다.".into());
-        }
+        stop_for_update(app, &probe, cancel, cb, confirm).await?;
     }
-    fs::create_dir_all(&root).map_err(|_| "설치 폴더를 만들지 못했습니다.")?;
-    reject_reparse_path(&root)?;
     check_cancel(cancel)?;
     report(app, "설치 프로그램 실행", 0, None, cb);
     let mut cmd = Command::new(installer);
@@ -670,10 +757,14 @@ async fn install_executable(
         cmd.raw_arg(format!("/D={p}"));
     }
     report(app, "설치 중", 0, None, cb);
-    let status = tokio::task::spawn_blocking(move || cmd.status())
-        .await
-        .map_err(|_| "설치 프로그램 작업이 중단되었습니다.")?
-        .map_err(|_| "설치 프로그램을 시작하지 못했습니다.")?;
+    let guard_exe = exe.clone();
+    let status = tokio::task::spawn_blocking(move || {
+        require_stopped(&guard_exe)?;
+        cmd.status()
+            .map_err(|_| "설치 프로그램을 시작하지 못했습니다.".to_owned())
+    })
+    .await
+    .map_err(|_| "설치 프로그램 작업이 중단되었습니다.")??;
     if !status.success()
         && !(package.kind.eq_ignore_ascii_case("inno") && status.code() == Some(3010))
     {
@@ -868,8 +959,16 @@ pub(crate) fn read_product_version(_path: &Path) -> Option<String> {
 }
 
 #[cfg(test)]
+#[path = "install_process_tests.rs"]
+mod process_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    fn decline_force_close() -> ConfirmForceClose {
+        Arc::new(|_, _| Box::pin(async { Ok(false) }))
+    }
 
     fn package(kind: &str) -> PackageDefinition {
         PackageDefinition {
@@ -1021,6 +1120,7 @@ mod tests {
                     &installer,
                     progress.as_ref(),
                     &AtomicBool::new(false),
+                    &decline_force_close(),
                 ));
                 assert_eq!(result.unwrap().version, version);
             }
@@ -1040,6 +1140,7 @@ mod tests {
                 &failure,
                 progress.as_ref(),
                 &AtomicBool::new(false),
+                &decline_force_close(),
             ));
             assert!(result.is_err());
             let installed = find_installed(&paths, &app)

@@ -12,15 +12,17 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
+    future::Future,
     path::{Path, PathBuf},
+    pin::Pin,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, Weak,
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, Sender},
     },
     time::{Duration, Instant},
 };
-use tokio::runtime::Handle;
+use tokio::{runtime::Handle, sync::oneshot};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const SELF_ID: &str = "moa-launcher";
@@ -56,6 +58,16 @@ pub struct Snapshot {
     pub notification_ids: Vec<String>,
     pub auth_generation: u64,
     pub update_result: Option<UpdateResult>,
+    pub force_close_prompt: Option<ForceClosePrompt>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForceClosePrompt {
+    pub request_id: String,
+    pub app_id: String,
+    pub app_name: String,
+    pub process_count: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -84,6 +96,7 @@ pub enum EngineEvent {
     Error(String),
     ImportPreview(Catalog),
     CatalogSaved,
+    ForceCloseRequested,
     Artwork {
         id: String,
         icon: Option<String>,
@@ -106,6 +119,25 @@ struct Data {
     next_check: Instant,
     update_result: Option<UpdateResult>,
     working: bool,
+    force_close_prompt: Option<ForceClosePrompt>,
+}
+
+struct PendingForceClose {
+    prompt: ForceClosePrompt,
+    reply: oneshot::Sender<bool>,
+}
+
+struct ForceClosePromptGuard {
+    engine: Weak<Engine>,
+    request_id: String,
+}
+
+impl Drop for ForceClosePromptGuard {
+    fn drop(&mut self) {
+        if let Some(engine) = self.engine.upgrade() {
+            engine.clear_force_close_request(&self.request_id);
+        }
+    }
 }
 
 struct Engine {
@@ -118,6 +150,7 @@ struct Engine {
     data: Mutex<Data>,
     activity: tokio::sync::Mutex<()>,
     cancellations: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    force_close: Mutex<Option<PendingForceClose>>,
     batch_cancel: AtomicBool,
     exiting: AtomicBool,
     background: AtomicBool,
@@ -201,9 +234,11 @@ impl SharedEngine {
                 next_check: Instant::now() + interval,
                 update_result,
                 working: false,
+                force_close_prompt: None,
             }),
             activity: tokio::sync::Mutex::new(()),
             cancellations: Mutex::new(HashMap::new()),
+            force_close: Mutex::new(None),
             batch_cancel: AtomicBool::new(false),
             exiting: AtomicBool::new(false),
             background: AtomicBool::new(false),
@@ -521,12 +556,46 @@ impl SharedEngine {
             if let Some(c) = self.0.cancellations.lock().unwrap().get(&id) {
                 c.store(true, Ordering::SeqCst);
             }
+            self.0.cancel_force_close(&id);
         } else {
             self.0.batch_cancel.store(true, Ordering::SeqCst);
             for c in self.0.cancellations.lock().unwrap().values() {
                 c.store(true, Ordering::SeqCst);
             }
+            self.0.cancel_force_close_all();
         }
+    }
+
+    /// Resolves the currently displayed force-close confirmation only when its
+    /// request ID still matches. A denial also cancels the matching install.
+    pub fn respond_force_close(&self, request_id: &str, approved: bool) -> bool {
+        let pending = {
+            let mut slot = self.0.force_close.lock().unwrap();
+            if slot
+                .as_ref()
+                .is_some_and(|pending| pending.prompt.request_id == request_id)
+            {
+                slot.take()
+            } else {
+                None
+            }
+        };
+        let Some(pending) = pending else {
+            return false;
+        };
+        if !approved
+            && let Some(cancel) = self
+                .0
+                .cancellations
+                .lock()
+                .unwrap()
+                .get(&pending.prompt.app_id)
+        {
+            cancel.store(true, Ordering::SeqCst);
+        }
+        self.0.clear_force_close_snapshot(request_id);
+        let _ = pending.reply.send(approved);
+        true
     }
     pub fn launch(&self, id: &str) -> Result<(), String> {
         let view = self.0.view(id)?;
@@ -667,6 +736,86 @@ impl Engine {
             notification_ids: data.notification_ids.clone(),
             auth_generation: data.auth_generation,
             update_result: data.update_result.clone(),
+            force_close_prompt: data.force_close_prompt.clone(),
+        }
+    }
+
+    fn request_force_close(
+        &self,
+        prompt: ForceClosePrompt,
+        reply: oneshot::Sender<bool>,
+    ) -> Result<(), oneshot::Sender<bool>> {
+        let mut slot = self.force_close.lock().unwrap();
+        if slot.is_some() {
+            return Err(reply);
+        }
+        self.data.lock().unwrap().force_close_prompt = Some(prompt.clone());
+        *slot = Some(PendingForceClose { prompt, reply });
+        Ok(())
+    }
+
+    fn clear_force_close_snapshot(&self, request_id: &str) {
+        let mut data = self.data.lock().unwrap();
+        if data
+            .force_close_prompt
+            .as_ref()
+            .is_some_and(|prompt| prompt.request_id == request_id)
+        {
+            data.force_close_prompt = None;
+        }
+        drop(data);
+        self.changed();
+    }
+
+    fn clear_force_close_request(&self, request_id: &str) {
+        let pending = {
+            let mut slot = self.force_close.lock().unwrap();
+            if slot
+                .as_ref()
+                .is_some_and(|pending| pending.prompt.request_id == request_id)
+            {
+                slot.take()
+            } else {
+                None
+            }
+        };
+        if pending.is_some() {
+            self.clear_force_close_snapshot(request_id);
+        }
+    }
+
+    fn cancel_force_close(&self, app_id: &str) {
+        let request_id = {
+            let mut slot = self.force_close.lock().unwrap();
+            if slot
+                .as_ref()
+                .is_some_and(|pending| pending.prompt.app_id == app_id)
+            {
+                slot.take().map(|pending| {
+                    let request_id = pending.prompt.request_id.clone();
+                    let _ = pending.reply.send(false);
+                    request_id
+                })
+            } else {
+                None
+            }
+        };
+        if let Some(request_id) = request_id {
+            self.clear_force_close_snapshot(&request_id);
+        }
+    }
+
+    fn cancel_force_close_all(&self) {
+        let request_id = {
+            let mut slot = self.force_close.lock().unwrap();
+            slot.take().map(|pending| {
+                let request_id = pending.prompt.request_id.clone();
+                let _ = pending.reply.send(false);
+                request_id
+            })
+        };
+        if let Some(request_id) = request_id {
+            self.clear_force_close_snapshot(&request_id);
         }
     }
     fn view(&self, id: &str) -> Result<AppView, String> {
@@ -987,6 +1136,7 @@ async fn perform_install(
             &latest.release,
             cancel.clone(),
             progress,
+            force_close_confirmation(engine.clone(), cancel.clone()),
         )
         .await?;
         engine.update(id, |a| a.installed = Some(installed));
@@ -1011,6 +1161,48 @@ async fn perform_install(
     }
     engine.changed();
     result
+}
+
+fn force_close_confirmation(
+    engine: Arc<Engine>,
+    cancel: Arc<AtomicBool>,
+) -> install::ConfirmForceClose {
+    Arc::new(move |installed, process_count| {
+        let engine = engine.clone();
+        let cancel = cancel.clone();
+        Box::pin(async move {
+            if cancel.load(Ordering::SeqCst) {
+                return Ok(false);
+            }
+            let app_name = engine
+                .view(&installed.app_id)
+                .map(|app| app.definition.name)
+                .unwrap_or_else(|_| installed.app_id.clone());
+            let prompt = ForceClosePrompt {
+                request_id: uuid::Uuid::new_v4().to_string(),
+                app_id: installed.app_id.clone(),
+                app_name,
+                process_count,
+            };
+            let (reply, response) = oneshot::channel();
+            let request_id = prompt.request_id.clone();
+            engine
+                .request_force_close(prompt, reply)
+                .map_err(|_| "다른 프로그램의 종료 확인이 진행 중입니다.".to_owned())?;
+            let _guard = ForceClosePromptGuard {
+                engine: Arc::downgrade(&engine),
+                request_id,
+            };
+            if cancel.load(Ordering::SeqCst) {
+                engine.cancel_force_close(&installed.app_id);
+                return Ok(false);
+            }
+            engine.event(EngineEvent::ForceCloseRequested);
+            engine.changed();
+            let approved = response.await.unwrap_or(false);
+            Ok(approved && !cancel.load(Ordering::SeqCst))
+        }) as Pin<Box<dyn Future<Output = Result<bool, String>> + Send>>
+    })
 }
 
 async fn update_all(engine: Arc<Engine>) -> Result<(), String> {
@@ -1092,6 +1284,41 @@ mod tests {
 
     fn remove_fixture(path: &Path) {
         let _ = std::fs::remove_dir_all(path);
+    }
+
+    fn installed_fixture(app_id: &str) -> InstalledApp {
+        InstalledApp {
+            app_id: app_id.into(),
+            version: "1.0.0".into(),
+            executable_path: "C:/fixture/app.exe".into(),
+            install_directory: "C:/fixture".into(),
+            package_kind: "zip".into(),
+            installed_at: String::new(),
+        }
+    }
+
+    fn register_cancellation(engine: &SharedEngine, app_id: &str) -> Arc<AtomicBool> {
+        let cancel = Arc::new(AtomicBool::new(false));
+        engine
+            .0
+            .cancellations
+            .lock()
+            .unwrap()
+            .insert(app_id.into(), cancel.clone());
+        cancel
+    }
+
+    async fn wait_for_force_close_prompt(engine: &SharedEngine) -> ForceClosePrompt {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(prompt) = engine.snapshot().force_close_prompt {
+                    break prompt;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("force-close prompt should be published")
     }
 
     #[test]
@@ -1204,6 +1431,138 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, EngineEvent::CatalogSaved))
         );
+        remove_fixture(&path);
+    }
+
+    #[test]
+    fn force_close_confirmation_accepts_only_matching_approval() {
+        let (engine, runtime, path) = fixture();
+        let cancel = register_cancellation(&engine, "moaview");
+        runtime.block_on(async {
+            let confirm = force_close_confirmation(engine.0.clone(), cancel.clone());
+            let task = tokio::spawn(async move { confirm(installed_fixture("moaview"), 2).await });
+            let prompt = wait_for_force_close_prompt(&engine).await;
+            assert_eq!(prompt.app_id, "moaview");
+            assert_eq!(prompt.process_count, 2);
+            assert!(!engine.respond_force_close("stale-request", true));
+            assert_eq!(
+                engine
+                    .snapshot()
+                    .force_close_prompt
+                    .as_ref()
+                    .map(|current| current.request_id.as_str()),
+                Some(prompt.request_id.as_str())
+            );
+            assert!(engine.respond_force_close(&prompt.request_id, true));
+            assert!(task.await.unwrap().unwrap());
+            assert!(!cancel.load(Ordering::SeqCst));
+            assert!(engine.snapshot().force_close_prompt.is_none());
+        });
+        remove_fixture(&path);
+    }
+
+    #[test]
+    fn force_close_rejection_cancels_matching_install() {
+        let (engine, runtime, path) = fixture();
+        let cancel = register_cancellation(&engine, "moaview");
+        runtime.block_on(async {
+            let confirm = force_close_confirmation(engine.0.clone(), cancel.clone());
+            let task = tokio::spawn(async move { confirm(installed_fixture("moaview"), 1).await });
+            let prompt = wait_for_force_close_prompt(&engine).await;
+            assert!(engine.respond_force_close(&prompt.request_id, false));
+            assert!(!task.await.unwrap().unwrap());
+            assert!(cancel.load(Ordering::SeqCst));
+            assert!(engine.snapshot().force_close_prompt.is_none());
+        });
+        remove_fixture(&path);
+    }
+
+    #[test]
+    fn dropping_polled_force_close_future_clears_prompt() {
+        let (engine, runtime, path) = fixture();
+        let cancel = register_cancellation(&engine, "moaview");
+        runtime.block_on(async {
+            let confirm = force_close_confirmation(engine.0.clone(), cancel);
+            let task = tokio::spawn(async move { confirm(installed_fixture("moaview"), 1).await });
+            let prompt = wait_for_force_close_prompt(&engine).await;
+            task.abort();
+            let _ = task.await;
+            assert!(engine.snapshot().force_close_prompt.is_none());
+            assert!(!engine.respond_force_close(&prompt.request_id, true));
+        });
+        remove_fixture(&path);
+    }
+
+    #[test]
+    fn cancellation_clears_force_close_prompt_for_one_or_all_apps() {
+        let (engine, runtime, path) = fixture();
+        let cancel = register_cancellation(&engine, "moaview");
+        runtime.block_on(async {
+            let confirm = force_close_confirmation(engine.0.clone(), cancel.clone());
+            let task = tokio::spawn(async move { confirm(installed_fixture("moaview"), 1).await });
+            let _ = wait_for_force_close_prompt(&engine).await;
+            engine.cancel(Some("moaview".into()));
+            assert!(!task.await.unwrap().unwrap());
+            assert!(cancel.load(Ordering::SeqCst));
+            assert!(engine.snapshot().force_close_prompt.is_none());
+
+            cancel.store(false, Ordering::SeqCst);
+            let confirm = force_close_confirmation(engine.0.clone(), cancel.clone());
+            let task = tokio::spawn(async move { confirm(installed_fixture("moaview"), 1).await });
+            let _ = wait_for_force_close_prompt(&engine).await;
+            engine.cancel(None);
+            assert!(!task.await.unwrap().unwrap());
+            assert!(cancel.load(Ordering::SeqCst));
+            assert!(engine.snapshot().force_close_prompt.is_none());
+        });
+        remove_fixture(&path);
+    }
+
+    #[test]
+    fn old_prompt_guard_does_not_clear_a_new_request() {
+        let (engine, _runtime, path) = fixture();
+        let (old_reply, _old_response) = oneshot::channel();
+        let old_prompt = ForceClosePrompt {
+            request_id: "old-request".into(),
+            app_id: "moaview".into(),
+            app_name: "MoaView".into(),
+            process_count: 1,
+        };
+        assert!(
+            engine
+                .0
+                .request_force_close(old_prompt.clone(), old_reply)
+                .is_ok()
+        );
+        let old_guard = ForceClosePromptGuard {
+            engine: Arc::downgrade(&engine.0),
+            request_id: old_prompt.request_id.clone(),
+        };
+        assert!(engine.respond_force_close(&old_prompt.request_id, true));
+
+        let (new_reply, _new_response) = oneshot::channel();
+        let new_prompt = ForceClosePrompt {
+            request_id: "new-request".into(),
+            app_id: "moaview".into(),
+            app_name: "MoaView".into(),
+            process_count: 1,
+        };
+        assert!(
+            engine
+                .0
+                .request_force_close(new_prompt.clone(), new_reply)
+                .is_ok()
+        );
+        drop(old_guard);
+        assert_eq!(
+            engine
+                .snapshot()
+                .force_close_prompt
+                .as_ref()
+                .map(|prompt| prompt.request_id.as_str()),
+            Some("new-request")
+        );
+        assert!(engine.respond_force_close(&new_prompt.request_id, true));
         remove_fixture(&path);
     }
 }

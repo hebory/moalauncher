@@ -1,3 +1,4 @@
+mod app_process;
 pub mod artwork;
 pub mod credentials;
 pub mod download;
