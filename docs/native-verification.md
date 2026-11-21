@@ -106,3 +106,14 @@ Windows 로그인 전체 과정, 실제 새 릴리스 알림 클릭, Explorer �
 - 설치본의 창 없는 시작, 단일 인스턴스 활성화, CLR·WebView 모듈 0개를 확인했습니다. 실제 화면의 기존 앱 여섯 개, GitHub 연결, 업데이트 상태를 확인하고 창을 열어두었습니다. 백업·패키지·로그와 개인 비교 자료는 무시되는 `artifacts/running-update-verification/`에만 보관합니다.
 
 재현할 때는 Windows에서 `scripts/Test-RustInstall.ps1 -TestRunningApps -MakensisPath <makensis.exe> -IsccPath <ISCC.exe>`를 실행합니다. 스크립트가 전용 프로세스 fixture와 실제 설치기를 빌드하고 격리 검증을 실행하며, fixture는 배포 ZIP·설치 프로그램에 포함하지 않습니다.
+
+## 0.3.3 공개 배포와 PC 업데이트
+
+2026-11-21에 [v0.3.3](https://github.com/hebory/moalauncher/releases/tag/v0.3.3)을 최신 안정 릴리스로 게시했습니다. UI 재설계·상태 배지 규칙과 실행 중인 앱 종료 후 업데이트 변경을 포함합니다.
+
+- 배포 태그의 소스는 `a4052e1733a33dbd73bd9c444f095aacfe9f3d65`입니다. [GitHub Actions 실행 44855218603](https://github.com/hebory/moalauncher/actions/runs/44855218603)의 형식·Clippy·테스트·Windows 빌드·패키징·게시 작업이 모두 성공했습니다. 로컬에서도 같은 필수 검사와 일반 테스트 46개를 통과했으며, 외부 의존성 변경 없이 런처 버전만 올렸습니다.
+- 공개 자산은 ZIP·설치 파일·각 SHA-256 sidecar·`SHA256SUMS.txt` 다섯 개입니다. 공개 다운로드의 크기와 GitHub digest, sidecar 및 합산 체크섬을 모두 대조했습니다. ZIP은 실행 파일·공개 카탈로그·MIT 라이선스·외부 라이선스 고지·payload 목록 다섯 파일로 구성되며 개인 카탈로그와 테스트 실행 파일을 포함하지 않습니다.
+- ZIP SHA-256: `f9a1da8a843bb8f1bee27a5bb52d0037b116a1ab9e6efcc7102c7ab426a2088f`. 설치 파일 SHA-256: `3274cc25142e15796fb8d3c176657f0bc22c7f1ee1e3ad524fcb600a02346c06`.
+- 적용 전 기존 0.3.2 설치와 최신 개인 데이터를 새로 백업하고, 정상 종료한 뒤 공개 릴리스에서 검증한 설치 파일을 실행했습니다. 설치기 종료 코드 0, 실행 파일과 Windows 설치 등록 버전 모두 `0.3.3`, 설치 payload 다섯 파일이 공식 ZIP과 일치했습니다.
+- 설치 전후와 실행 후 개인 카탈로그·설정·설치 상태 JSON 여섯 파일의 해시, GitHub 인증 지문, 자동 실행 등록 값이 동일했습니다. 창 없는 시작, 단일 인스턴스 활성화, CLR·WebView 모듈 0개를 확인했습니다.
+- 실제 PC 화면에서 0.3.3 버전·앱 여섯 개·GitHub 연결과 아이콘·커버 표시를 확인했습니다. 확인 뒤 프로그램 화면을 열어두었습니다. 검증 자료·패키지·설치 로그·백업은 무시되는 `artifacts/release-verification/v0.3.3/`에만 보관합니다.
