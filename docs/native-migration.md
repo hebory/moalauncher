@@ -41,7 +41,7 @@ cargo fmt --manifest-path native/Cargo.toml -- --check
 cargo clippy --locked --manifest-path native/Cargo.toml --all-targets -- -D warnings
 cargo test --locked --manifest-path native/Cargo.toml
 cargo build --release --locked --manifest-path native/Cargo.toml --bin MoaLauncher
-./scripts/Publish-Rust.ps1 -Version 0.3.2 -IsccPath <ISCC.exe 경로>
+./scripts/Publish-Rust.ps1 -Version 0.3.3 -IsccPath <ISCC.exe 경로>
 ```
 
 기존 런처가 실행 중이면 트레이의 종료를 먼저 선택합니다. 격리 시험에는 `MoaLauncher.exe --data-dir <별도 폴더>`를 사용합니다. 인증은 데이터 경로별로 구분되므로 별도 폴더에 자동 복사하지 않습니다.
